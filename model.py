@@ -89,8 +89,10 @@ class Model(object):
 
 	def context_to_query(self):
 		with tf.variable_scope("Context_to_Query_Attention_Layer"):
-			S = tf.matmul(self.passage_context, tf.transpose(self.question_context,(0,2,1)))
-			S_ = tf.nn.softmax(S)
+			P = tf.tile(tf.expand_dims(self.passage_context,2),[1,1,Params.max_q_len,1])
+			Q = tf.tile(tf.expand_dims(self.question_context,1),[1,Params.max_p_len,1,1])
+			S = tf.squeeze(trilinear([P, Q, P*Q], 1, bias = Params.bias, scope = "trilinear"))
+			S_ = tf.nn.softmax(mask_logits(S, self.question_len))
 			self.c2q_attention = tf.matmul(S_, self.question_context)
 
 	def model_encoder(self):
@@ -105,7 +107,7 @@ class Model(object):
 			start_prob = tf.layers.dense(tf.concat([self.encoder_outputs[1], self.encoder_outputs[2]],axis = -1),1, name = "start_index_projection")
 			end_prob = tf.layers.dense(tf.concat([self.encoder_outputs[1], self.encoder_outputs[3]],axis = -1),1, name = "end_index_projection")
 			logits = tf.stack([start_prob, end_prob],axis = 1)
-			self.logits = tf.squeeze(logits)
+			self.logits = mask_logits(tf.squeeze(logits), self.passage_len)
 
 	def loss_function(self):
 		with tf.variable_scope("loss"):

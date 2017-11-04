@@ -7,11 +7,22 @@ import math
 
 from tensorflow.contrib.rnn import MultiRNNCell
 from tensorflow.contrib.rnn import RNNCell
+
+from tensorflow.python.util import nest
+from tensorflow.python.ops import math_ops
+from tensorflow.python.ops import array_ops
+from tensorflow.python.ops import init_ops
+from tensorflow.python.ops import nn_ops
+from tensorflow.python.ops import clip_ops
+
 from params import Params
+from functools import reduce
+from operator import mul
 # from common_layers import *
 
 '''
-Some of the functions are burrowed from Tensor2Tensor Library https://github.com/tensorflow/tensor2tensor/blob/master/tensor2tensor/layers/common_attention.py
+Some of the functions are borrowed from Tensor2Tensor Library https://github.com/tensorflow/tensor2tensor/blob/master/tensor2tensor/layers/common_attention.py
+and BiDAF repository https://github.com/allenai/bi-att-flow.
 '''
 
 initializer = tf.contrib.layers.xavier_initializer
@@ -42,11 +53,25 @@ def encoder_block(inputs, num_conv_layers, kernel_size, num_filters, scope = "en
 def self_attention(queries, units, num_heads, scope = "Multi_Head_Attention", reuse = None, is_training = True):
     with tf.variable_scope(scope, reuse = reuse):
         combined = tf.layers.dense(queries, 3 * units, activation = tf.nn.relu, reuse = reuse)
-        Q, K, V = [split_last_dimension(tensor, num_heads) for tensor in tf.split(combined,3,axis = -1)]
+        Q, K, V = [split_last_dimension(tensor, num_heads) for tensor in tf.split(combined,3,axis = 2)]
         key_depth_per_head = units // num_heads
-        Q *= key_depth_per_head**-0.5
-        x = dot_product_attention(Q,K,V,bias = True, dropout_rate = Params.dropout, is_training = is_training, scope = "dot_product_attention", reuse = reuse)
+        Q *= key_depth_per_head**-0.5  # [batch, length_q, head, depth_k]
+        Q = tf.transpose(Q,[0, 2, 1, 3]) # [batch, heads, length_q, depth_k]
+        K = tf.transpose(K,[0, 2, 1, 3])
+        V = tf.transpose(V,[0, 2, 1, 3])
+        x = dot_product_attention(Q,K,V,bias = True, dropout_rate = Params.dropout, is_training = is_training, scope = "dot_product_attention", reuse = reuse) # [batch, heads, length, depth]
+        x = tf.transpose(x, [0, 2, 1, 3])
         return combine_last_two_dimensions(x)
+
+def mask_logits(inputs, sequence_length, mask_value = -1e30):
+    return inputs
+    # shapes = inputs.shape.as_list()
+    # input_mask = tf.expand_dims(tf.sequence_mask(
+    #     sequence_length, maxlen=shapes[-1]),1)
+    # input_mask = tf.tile(input_mask,[1,shapes[1],1])
+    # mask_values = mask_value * tf.ones_like(inputs)
+    # masked_outputs = tf.where(input_mask, inputs, mask_values)
+    # return tf.reshape(masked_outputs,(shapes[0],shapes[1],shapes[2]))
 
 def depthwise_separable_convolution(inputs, num_layers, kernel_size, num_filters, scope = "depthwise_separable_convolution", reuse = None):
     with tf.variable_scope(scope, reuse = reuse):
@@ -101,9 +126,10 @@ def dot_product_attention(q,
     with tf.variable_scope(scope, default_name="dot_product_attention", reuse = reuse):
         # [batch, num_heads, query_length, memory_length]
         logits = tf.matmul(q, k, transpose_b=True)
-        if bias:
-            b = tf.get_variable("bias", logits.shape[-1], initializer = initializer())
-            logits += b
+        # print(logits)
+        # if bias:
+        #     b = tf.get_variable("bias", logits.shape[-1], initializer = initializer())
+        #     logits += b
         weights = tf.nn.softmax(logits, name="attention_weights")
         # dropping out the attention links for each of the heads
         if is_training and Params.dropout:
@@ -187,6 +213,101 @@ def get_timing_signal_1d(length, channels, min_timescale=1.0, max_timescale=1.0e
     signal = tf.pad(signal, [[0, 0], [0, tf.mod(channels, 2)]])
     signal = tf.reshape(signal, [1, length, channels])
     return signal
+
+def trilinear(args, output_size, bias, bias_start=0.0, scope=None, squeeze=False, wd=0.0, input_keep_prob=1.0,
+           is_train=None):
+    flat_args = [flatten(arg, 1) for arg in args]
+    if input_keep_prob < 1.0:
+        if is_train:
+            flat_args = [tf.cond(is_train, lambda: tf.nn.dropout(arg, input_keep_prob), lambda: arg)
+                     for arg in flat_args]
+    flat_out = _linear(flat_args, output_size, bias, scope=scope)
+    out = reconstruct(flat_out, args[0], 1)
+    if squeeze:
+        out = tf.squeeze(out, [len(args[0].get_shape().as_list())-1])
+    return out
+
+def flatten(tensor, keep):
+    fixed_shape = tensor.get_shape().as_list()
+    start = len(fixed_shape) - keep
+    left = reduce(mul, [fixed_shape[i] or tf.shape(tensor)[i] for i in range(start)])
+    out_shape = [left] + [fixed_shape[i] or tf.shape(tensor)[i] for i in range(start, len(fixed_shape))]
+    flat = tf.reshape(tensor, out_shape)
+    return flat
+
+def reconstruct(tensor, ref, keep):
+    ref_shape = ref.get_shape().as_list()
+    tensor_shape = tensor.get_shape().as_list()
+    ref_stop = len(ref_shape) - keep
+    tensor_start = len(tensor_shape) - keep
+    pre_shape = [ref_shape[i] or tf.shape(ref)[i] for i in range(ref_stop)]
+    keep_shape = [tensor_shape[i] or tf.shape(tensor)[i] for i in range(tensor_start, len(tensor_shape))]
+    # pre_shape = [tf.shape(ref)[i] for i in range(len(ref.get_shape().as_list()[:-keep]))]
+    # keep_shape = tensor.get_shape().as_list()[-keep:]
+    target_shape = pre_shape + keep_shape
+    out = tf.reshape(tensor, target_shape)
+    return out
+
+
+def _linear(args,
+            output_size,
+            bias,
+            bias_initializer=None,
+            scope = None,
+            kernel_initializer=None):
+  """Linear map: sum_i(args[i] * W[i]), where W[i] is a variable.
+  Args:
+    args: a 2D Tensor or a list of 2D, batch x n, Tensors.
+    output_size: int, second dimension of W[i].
+    bias: boolean, whether to add a bias term or not.
+    bias_initializer: starting value to initialize the bias
+      (default is all zeros).
+    kernel_initializer: starting value to initialize the weight.
+  Returns:
+    A 2D Tensor with shape [batch x output_size] equal to
+    sum_i(args[i] * W[i]), where W[i]s are newly created matrices.
+  Raises:
+    ValueError: if some of the arguments has unspecified or wrong shape.
+  """
+  if args is None or (nest.is_sequence(args) and not args):
+    raise ValueError("`args` must be specified")
+  if not nest.is_sequence(args):
+    args = [args]
+  # Calculate the total size of arguments on dimension 1.
+  total_arg_size = 0
+  shapes = [a.get_shape() for a in args]
+  for shape in shapes:
+    if shape.ndims != 2:
+      raise ValueError("linear is expecting 2D arguments: %s" % shapes)
+    if shape[1].value is None:
+      raise ValueError("linear expects shape[1] to be provided for shape %s, "
+                       "but saw %s" % (shape, shape[1]))
+    else:
+      total_arg_size += shape[1].value
+
+  dtype = [a.dtype for a in args][0]
+
+  # Now the computation.
+  with tf.variable_scope(scope) as outer_scope:
+    weights = tf.get_variable(
+        "linear_kernel", [total_arg_size, output_size],
+        dtype=dtype,
+        initializer=kernel_initializer)
+    if len(args) == 1:
+      res = math_ops.matmul(args[0], weights)
+    else:
+      res = math_ops.matmul(array_ops.concat(args, 1), weights)
+    if not bias:
+      return res
+    with tf.variable_scope(outer_scope) as inner_scope:
+      inner_scope.set_partitioner(None)
+      if bias_initializer is None:
+        bias_initializer = init_ops.constant_initializer(0.0, dtype=dtype)
+      biases = tf.get_variable(
+          "linear_bias", [output_size],
+          dtype=dtype,
+          initializer=bias_initializer)
+    return nn_ops.bias_add(res, biases)
 
 def total_params():
     total_parameters = 0
