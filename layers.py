@@ -46,7 +46,7 @@ def residual_block(inputs, num_blocks, num_conv_layers, kernel_size, num_filters
 def encoder_block(inputs, num_conv_layers, kernel_size, num_filters, seq_len = None, scope = "encoder_block", is_training = True, reuse = None, bias = Params.bias):
     with tf.variable_scope(scope, reuse = reuse):
         inputs = add_timing_signal_1d(inputs)
-        outputs = depthwise_separable_convolution(inputs, num_layers = num_conv_layers, kernel_size = kernel_size, num_filters = num_filters, reuse = reuse)
+        outputs = depthwise_separable_convolution(inputs, num_layers = num_conv_layers, kernel_size = kernel_size, num_filters = num_filters, is_training = is_training, reuse = reuse)
         outputs = multihead_attention(outputs, num_filters, num_heads = 2, seq_len = seq_len, reuse = reuse, is_training = is_training, bias = bias)
         return tf.layers.dense(outputs, num_filters, use_bias = Params.bias, kernel_initializer = initializer(), activation = tf.nn.relu, name = "output_projection", reuse = reuse)
 
@@ -71,12 +71,6 @@ def cross_entropy(output, target):
     cross_entropy = tf.reduce_sum(cross_entropy, 1)
     return tf.reduce_mean(cross_entropy)
 
-def cross_entropy(output, target):
-    cross_entropy = target * tf.log(output + 1e-9)
-    cross_entropy = -tf.reduce_sum(cross_entropy, 2)
-    cross_entropy = tf.reduce_sum(cross_entropy, 1)
-    return tf.reduce_mean(cross_entropy)
-
 def depthwise_separable_convolution(inputs, num_layers, kernel_size, num_filters, scope = "depthwise_separable_convolution", is_training = True, reuse = None):
     with tf.variable_scope(scope, reuse = reuse):
         outputs = tf.expand_dims(inputs, axis = 2)
@@ -90,6 +84,8 @@ def depthwise_separable_convolution(inputs, num_layers, kernel_size, num_filters
                                 strides = (1,1,1,1),
                                 padding = "SAME")
             outputs = tf.nn.relu(outputs)
+            if (i + 1) % 2 == 0 and is_training:
+                outputs = tf.nn.dropout(outputs, 1.0 - Params.dropout) if Params.dropout is not None else outputs
         return tf.squeeze(outputs)
 
 def split_last_dimension(x, n):

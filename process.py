@@ -233,12 +233,14 @@ def pad_data(data, max_word):
     return padded_data
 
 def pad_char_len(data, max_word, max_char):
-    padded_data = np.zeros((len(data), max_word), dtype=np.int32)
+    padded_data = np.ones((len(data), max_word), dtype=np.int32)
     for i, line in enumerate(data):
         for j, word in enumerate(line):
             if j >= max_word:
                 break
             padded_data[i, j] = word if word <= max_char else max_char
+            if word < max_char:
+                print("illegal")
     return padded_data
 
 def pad_char_data(data, max_char, max_words):
