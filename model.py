@@ -17,7 +17,6 @@ optimizer_factory = {"adadelta":tf.train.AdadeltaOptimizer,
 			"adam":tf.train.AdamOptimizer,
 			"gradientdescent":tf.train.GradientDescentOptimizer,
 			"adagrad":tf.train.AdagradOptimizer}
-
 initializer = tf.contrib.layers.xavier_initializer
 
 class Model(object):
@@ -34,8 +33,6 @@ class Model(object):
 			self.question_c,
 			self.passage_w_len_,
 			self.question_w_len_,
-			self.passage_c_len,
-			self.question_c_len,
 			self.indices) = self.data
 
 			self.passage_len = tf.squeeze(self.passage_w_len_)
@@ -55,7 +52,6 @@ class Model(object):
 
 	def encode_ids(self):
 		with tf.variable_scope("Input_Embedding_Layer"):
-			self.unknown_word_embeddings = tf.get_variable("unknown_word_embeddings", (1, Params.emb_size),dtype = tf.float32, initializer = initializer())
 			self.unknown_char_embeddings = tf.get_variable("unknown_char_embeddings", (1, Params.emb_size),dtype = tf.float32, initializer = initializer())
 			self.char_embeddings = tf.get_variable("char_embeddings", (Params.char_vocab_size, Params.emb_size), dtype = tf.float32, initializer = initializer())
 			self.char_embeddings = tf.concat((self.unknown_char_embeddings, self.char_embeddings),axis = 0)
@@ -63,29 +59,30 @@ class Model(object):
 				self.word_embeddings = tf.Variable(tf.constant(0.0, shape=[Params.vocab_size, Params.emb_size]),trainable=False, name="word_embeddings")
 				self.word_embeddings_placeholder = tf.placeholder(tf.float32,[Params.vocab_size, Params.emb_size],"word_embeddings_placeholder")
 				self.emb_assign = tf.assign(self.word_embeddings, self.word_embeddings_placeholder)
-				self.word_embeddings = tf.concat((self.unknown_word_embeddings, self.word_embeddings),axis = 0)
 
 			# Embed the question and passage information for word and character tokens
 			self.passage_word_encoded, self.passage_char_encoded = encoding(self.passage_w,
 											self.passage_c,
 											word_embeddings = self.word_embeddings,
-											char_embeddings = self.char_embeddings,
-											scope = "passage_embeddings")
+											char_embeddings = self.char_embeddings)
 			self.question_word_encoded, self.question_char_encoded = encoding(self.question_w,
 											self.question_c,
 											word_embeddings = self.word_embeddings,
-											char_embeddings = self.char_embeddings,
-											scope = "question_embeddings")
-
+											char_embeddings = self.char_embeddings)
 			self.passage_char_encoded = tf.reduce_max(self.passage_char_encoded, axis = 2)
 			self.question_char_encoded = tf.reduce_max(self.question_char_encoded, axis = 2)
+			if self.is_training and Params.dropout is not None:
+				self.passage_word_encoded = tf.nn.dropout(self.passage_word_encoded, 1.0 - Params.dropout)
+				self.passage_char_encoded = tf.nn.dropout(self.passage_char_encoded, 1.0 - 0.05)
+				self.question_word_encoded = tf.nn.dropout(self.question_word_encoded, 1.0 - Params.dropout)
+				self.question_char_encoded = tf.nn.dropout(self.question_char_encoded, 1.0 - 0.05)
 			self.passage_encoding = tf.concat((self.passage_word_encoded, self.passage_char_encoded), axis = -1)
 			self.question_encoding = tf.concat((self.question_word_encoded, self.question_char_encoded), axis = -1)
 
 	def embedding_encoder(self):
 		with tf.variable_scope("Embedding_Encoder_Layer"):
-			self.passage_context = residual_block(self.passage_encoding, num_blocks = 1, num_conv_layers = 4, kernel_size = 7 , num_filters = Params.num_units, scope = "Encoder_Residual_Block", is_training = self.is_training, reuse = False)
-			self.question_context = residual_block(self.question_encoding, num_blocks = 1, num_conv_layers = 4, kernel_size = 7 , num_filters = Params.num_units, scope = "Encoder_Residual_Block", is_training = self.is_training, reuse = True)
+			self.passage_context = residual_block(self.passage_encoding, num_blocks = 1, num_conv_layers = 4, kernel_size = 5 , num_filters = Params.num_units, input_projection = True, seq_len = self.passage_len, scope = "Encoder_Residual_Block", is_training = self.is_training, reuse = False, bias = False)
+			self.question_context = residual_block(self.question_encoding, num_blocks = 1, num_conv_layers = 4, kernel_size = 5 , num_filters = Params.num_units, input_projection = True, seq_len = self.question_len, scope = "Encoder_Residual_Block", is_training = self.is_training, reuse = True, bias = False)
 
 	def context_to_query(self):
 		with tf.variable_scope("Context_to_Query_Attention_Layer"):
@@ -94,26 +91,29 @@ class Model(object):
 			S = tf.squeeze(trilinear([P, Q, P*Q], 1, bias = Params.bias, scope = "trilinear"))
 			S_ = tf.nn.softmax(mask_logits(S, self.question_len))
 			self.c2q_attention = tf.matmul(S_, self.question_context)
+			if self.is_training and Params.dropout is not None:
+				self.c2q_attention = tf.nn.dropout(self.c2q_attention, 1.0 - Params.dropout)
 
 	def model_encoder(self):
 		with tf.variable_scope("Model_Encoder_Layer"):
 			inputs = tf.concat([self.passage_context, self.c2q_attention, self.passage_context * self.c2q_attention], axis = -1)
 			self.encoder_outputs = [tf.layers.dense(inputs, Params.num_units, name = "input_projection")]
 			for i in range(3):
-				self.encoder_outputs.append(residual_block(self.encoder_outputs[i], num_blocks = 7, num_conv_layers = 2, kernel_size = 5, num_filters = Params.num_units, scope = "Model_Encoder", reuse = True if i > 0 else None))
+				self.encoder_outputs.append(residual_block(self.encoder_outputs[i], num_blocks = 7, num_conv_layers = 2, kernel_size = 7, num_filters = Params.num_units, seq_len = self.passage_len, scope = "Model_Encoder", reuse = True if i > 0 else None))
 
 	def output_layer(self):
 		with tf.variable_scope("Output_Layer"):
-			start_prob = tf.layers.dense(tf.concat([self.encoder_outputs[1], self.encoder_outputs[2]],axis = -1),1, name = "start_index_projection")
-			end_prob = tf.layers.dense(tf.concat([self.encoder_outputs[1], self.encoder_outputs[3]],axis = -1),1, name = "end_index_projection")
+			start_prob = tf.layers.dense(tf.concat([self.encoder_outputs[1], self.encoder_outputs[2]],axis = -1),1, use_bias = False, name = "start_pointer")
+			end_prob = tf.layers.dense(tf.concat([self.encoder_outputs[1], self.encoder_outputs[3]],axis = -1),1, use_bias = False, name = "end_pointer")
 			logits = tf.stack([start_prob, end_prob],axis = 1)
-			self.logits = mask_logits(tf.squeeze(logits), self.passage_len)
+			self.logits = tf.nn.softmax(mask_logits(tf.squeeze(logits), self.passage_len))
 
 	def loss_function(self):
 		with tf.variable_scope("loss"):
 			shapes = self.passage_w.shape
 			self.indices_prob = tf.one_hot(self.indices, shapes[1])
-			self.mean_loss = tf.reduce_mean(tf.reduce_sum(tf.nn.softmax_cross_entropy_with_logits(labels = self.indices_prob, logits = self.logits),axis = -1))
+			self.mean_loss = cross_entropy(self.logits, self.indices_prob)
+			# self.mean_loss = tf.reduce_mean(tf.reduce_sum(tf.nn.softmax_cross_entropy_with_logits(labels = self.indices_prob, logits = self.logits),axis = -1))
 			self.optimizer = optimizer_factory[Params.optimizer](**Params.opt_arg[Params.optimizer])
 
 			if Params.clip:
@@ -129,7 +129,7 @@ class Model(object):
 		self.F1_placeholder = tf.placeholder(tf.float32, shape = (), name = "F1_placeholder")
 		self.EM = tf.Variable(tf.constant(0.0, shape=(), dtype = tf.float32),trainable=False, name="EM")
 		self.EM_placeholder = tf.placeholder(tf.float32, shape = (), name = "EM_placeholder")
-		self.dev_loss = tf.Variable(tf.constant(5.0, shape=(), dtype = tf.float32),trainable=False, name="dev_loss")
+		self.dev_loss = tf.Variable(tf.constant(10.0, shape=(), dtype = tf.float32),trainable=False, name="dev_loss")
 		self.dev_loss_placeholder = tf.placeholder(tf.float32, shape = (), name = "dev_loss")
 		self.metric_assign = tf.group(tf.assign(self.F1, self.F1_placeholder),tf.assign(self.EM, self.EM_placeholder),tf.assign(self.dev_loss, self.dev_loss_placeholder))
 		tf.summary.scalar('loss_training', self.mean_loss)
@@ -192,7 +192,7 @@ def main():
 						index = np.argmax(logits, axis = 2)
 						F1, EM = 0.0, 0.0
 						for batch in range(Params.batch_size):
-							f1, em = f1_and_EM(index[batch], devdata[8][sample][batch], devdata[0][sample][batch], dict_)
+							f1, em = f1_and_EM(index[batch], devdata[6][sample][batch], devdata[0][sample][batch], dict_)
 							F1 += f1
 							EM += em
 						F1 /= float(Params.batch_size)

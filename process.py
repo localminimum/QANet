@@ -7,13 +7,11 @@ import json
 import codecs
 import unicodedata
 import re
-import nltk
 import sys
 import os
 import argparse
 
 from tqdm import tqdm
-from nltk.tokenize import *
 from params import Params
 
 reload(sys)
@@ -33,7 +31,7 @@ args = parser.parse_args()
 
 if args.process:
     import spacy
-    nlp = spacy.load('en')
+    nlp = spacy.blank('en')
 
     def tokenize_corenlp(text):
         parsed = nlp(text)
@@ -42,11 +40,11 @@ if args.process:
 
 class data_loader(object):
     def __init__(self,use_pretrained = None):
-        self.c_dict = {"_UNK":0,"_PAD":1}
-        self.w_dict = {"_UNK":0,"_PAD":1}
+        self.c_dict = {"_UNK":0, "_PAD":0}
+        self.w_dict = {"_UNK":0}
         self.w_occurence = 0
         self.c_occurence = 0
-        self.w_count = 2
+        self.w_count = 1
         self.c_count = 2
         self.w_unknown_count = 0
         self.c_unknown_count = 0
@@ -55,8 +53,8 @@ class data_loader(object):
 
         if use_pretrained:
             self.append_dict = False
-            self.w_dict, self.w_count = self.process_glove(Params.glove_dir, self.w_dict, self.w_count)
-            self.c_dict, self.c_count = self.process_glove(Params.glove_char, self.c_dict, self.c_count)
+            self.w_dict, self.w_count = self.process_glove(Params.glove_dir, self.w_dict, self.w_count, Params.emb_size)
+            self.c_dict, self.c_count = self.process_glove(Params.glove_char, self.c_dict, self.c_count, Params.char_emb_size)
             self.ids2word = {v: k for k, v in self.w_dict.iteritems()}
             self.ids2char = {v: k for k, v in self.c_dict.iteritems()}
 
@@ -74,17 +72,17 @@ class data_loader(object):
             output.append(" ")
         return "".join(output)
 
-    def process_glove(self, wordvecs, dict_, count):
+    def process_glove(self, wordvecs, dict_, count, emb_size):
         print("Reading GloVe from: {}".format(wordvecs))
         with codecs.open(wordvecs,"rb","utf-8") as f:
             line = f.readline()
             i = 0
             while line:
                 vocab = line.split(" ")
-                if len(vocab) != Params.emb_size + 1:
+                if len(vocab) != emb_size + 1:
                     line = f.readline()
                     continue
-                vocab = normalize_text(''.join(vocab[0:-Params.emb_size]).decode("utf-8"))
+                vocab = normalize_text(''.join(vocab[0:-emb_size]).decode("utf-8"))
                 if vocab not in dict_:
                     dict_[vocab] = count
                 line = f.readline()
@@ -105,7 +103,7 @@ class data_loader(object):
                 f.write("%s: %s" % (key, value) + "\n")
 
     def loop(self, data, dir_ = Params.train_dir):
-        for topic in data['data']:
+        for topic in tqdm(data['data'],total = len(data['data'])):
             for para in topic['paragraphs']:
 
                 words_c,chars_c = self.add_to_dict(para['context'])
@@ -201,7 +199,7 @@ def load_glove(dir_, name, vocab_size):
                     assert 0
             line = f.readline()
             i += 1
-    print("")
+    print("\n")
     glove_map = np.memmap(Params.data_dir + name + ".np", dtype='float32', mode='write', shape=(vocab_size,Params.emb_size))
     glove_map[:] = glove
     del glove_map
@@ -226,12 +224,21 @@ def write_file(indices, dir_, separate = "\n"):
         f.write(" ".join(indices) + separate)
 
 def pad_data(data, max_word):
-    padded_data = np.ones((len(data),max_word),dtype = np.int32)
+    padded_data = np.zeros((len(data),max_word),dtype = np.int32)
     for i,line in enumerate(data):
         for j,word in enumerate(line):
             if j >= max_word:
                 break
             padded_data[i,j] = word
+    return padded_data
+
+def pad_char_len(data, max_word, max_char):
+    padded_data = np.zeros((len(data), max_word), dtype=np.int32)
+    for i, line in enumerate(data):
+        for j, word in enumerate(line):
+            if j >= max_word:
+                break
+            padded_data[i, j] = word if word <= max_char else max_char
     return padded_data
 
 def pad_char_data(data, max_char, max_words):
@@ -306,7 +313,9 @@ def max_value(inputlist):
 def main():
     with open(Params.data_dir + 'dictionary.pkl','wb') as dictionary:
         loader = data_loader(use_pretrained = True)
+        print("Tokenizing training data.")
         loader.process_json(Params.data_dir + "train-v1.1.json", out_dir = Params.train_dir)
+        print("Tokenizing dev data.")
         loader.process_json(Params.data_dir + "dev-v1.1.json", out_dir = Params.dev_dir)
         pickle.dump(loader, dictionary, pickle.HIGHEST_PROTOCOL)
     print("Tokenizing complete")
@@ -314,6 +323,8 @@ def main():
     load_glove(Params.glove_dir,"glove",vocab_size = Params.vocab_size)
     load_glove(Params.glove_char,"glove_char", vocab_size = Params.char_vocab_size)
     print("Processing complete")
+    print("Unknown word ratio: {} / {}".format(loader.w_unknown_count,loader.w_occurence))
+    print("Unknown character ratio: {} / {}".format(loader.c_unknown_count,loader.c_occurence))
 
 if __name__ == "__main__":
     main()
