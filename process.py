@@ -42,10 +42,14 @@ if args.process:
 class data_loader(object):
     def __init__(self,use_pretrained = None):
         self.c_dict = {"_UNK":0, "_PAD":1}
+<<<<<<< HEAD
         self.w_dict = {"_UNK":0}
+=======
+        self.w_dict = {"_UNK":0, "_PAD":1}
+>>>>>>> bf16b90... Reduced glove vocabs, fixed some architectures
         self.w_occurence = 0
         self.c_occurence = 0
-        self.w_count = 1
+        self.w_count = 2
         self.c_count = 2
         self.w_unknown_count = 0
         self.c_unknown_count = 0
@@ -90,7 +94,7 @@ class data_loader(object):
                 count += 1
                 i += 1
                 if i % 100 == 0:
-                    sys.stdout.write("\rProcessing line %d"%i)
+                    sys.stdout.write("\rProcessing line %d       "%i)
             print("")
         return dict_, count
 
@@ -177,17 +181,18 @@ class data_loader(object):
         return (words, chars)
 
 def load_glove(dir_, name, vocab_size):
-    glove = np.zeros((vocab_size,Params.emb_size),dtype = np.float32)
+    glove = np.zeros((vocab_size-1, Params.emb_size),dtype = np.float32)
     with codecs.open(dir_,"rb","utf-8") as f:
         line = f.readline()
         i = 1
         while line:
             if i % 100 == 0:
-                sys.stdout.write("\rProcessing %d vocabs"%i)
+                sys.stdout.write("\rProcessing %d vocabs       "%i)
             vector = line.split(" ")
             if len(vector) != Params.emb_size + 1:
                 line = f.readline()
                 continue
+            name_ = vector[0]
             vector = vector[-Params.emb_size:]
             if vector:
                 try:
@@ -202,7 +207,7 @@ def load_glove(dir_, name, vocab_size):
             line = f.readline()
             i += 1
     print("\n")
-    glove_map = np.memmap(Params.data_dir + name + ".np", dtype='float32', mode='write', shape=(vocab_size,Params.emb_size))
+    glove_map = np.memmap(Params.data_dir + name + ".np", dtype='float32', mode='write', shape=(vocab_size - 1, Params.emb_size))
     glove_map[:] = glove
     del glove_map
 
@@ -212,9 +217,15 @@ def reduce_glove(dir_, dict_):
         line = f.readline()
         i = 0
         while line:
+<<<<<<< HEAD
 	    i += 1
             if i % 100 == 0:
                 sys.stdout.write("\rProcessing %d vocabs"%i)
+=======
+            i += 1
+            if i % 100 == 0:
+                sys.stdout.write("\rProcessing %d vocabs       "%i)
+>>>>>>> bf16b90... Reduced glove vocabs, fixed some architectures
             vector = line.split(" ")
             if len(vector) != Params.emb_size + 1:
                 line = f.readline()
@@ -227,6 +238,7 @@ def reduce_glove(dir_, dict_):
             line = f.readline()
     print("\nTotal number of lines: {}\nReduced vocab size: {}".format(i, len(glove_f)))
     with codecs.open(dir_, "wb", "utf-8") as f:
+<<<<<<< HEAD
         i = 1
         for line in glove_f[:-1]:
             f.write(line)
@@ -235,6 +247,11 @@ def reduce_glove(dir_, dict_):
             sys.stdout.write("\rProcessing %d vocabs"%i)
         i += 1
 
+=======
+        for line in glove_f[:-1]:
+            f.write(line)
+        f.write(glove_f[-1].strip("\n"))
+>>>>>>> bf16b90... Reduced glove vocabs, fixed some architectures
 
 def find_answer_index(context, answer):
     window_len = len(answer)
@@ -256,7 +273,7 @@ def write_file(indices, dir_, separate = "\n"):
         f.write(" ".join(indices) + separate)
 
 def pad_data(data, max_word):
-    padded_data = np.zeros((len(data),max_word),dtype = np.int32)
+    padded_data = np.ones((len(data),max_word),dtype = np.int32)
     for i,line in enumerate(data):
         for j,word in enumerate(line):
             if j >= max_word:
@@ -351,6 +368,7 @@ def main():
         loader.process_json(Params.data_dir + "train-v1.1.json", out_dir = Params.train_dir, write_ = False)
         loader.process_json(Params.data_dir + "dev-v1.1.json", out_dir = Params.dev_dir, write_ = False)
         reduce_glove(Params.glove_dir, loader.w_dict)
+<<<<<<< HEAD
     if args.process:
         with open(Params.data_dir + 'dictionary.pkl','wb') as dictionary:
             loader = data_loader(use_pretrained = True)
@@ -360,9 +378,21 @@ def main():
             loader.process_json(Params.data_dir + "dev-v1.1.json", out_dir = Params.dev_dir)
             pickle.dump(loader, dictionary, pickle.HIGHEST_PROTOCOL)
             print("Tokenizing complete")
+=======
+    with open(Params.data_dir + 'dictionary.pkl','wb') as dictionary:
+        loader = data_loader(use_pretrained = True)
+        print("Tokenizing training data.")
+        loader.process_json(Params.data_dir + "train-v1.1.json", out_dir = Params.train_dir)
+        print("Tokenizing dev data.")
+        loader.process_json(Params.data_dir + "dev-v1.1.json", out_dir = Params.dev_dir)
+        pickle.dump(loader, dictionary, pickle.HIGHEST_PROTOCOL)
+    print("Tokenizing complete")
+>>>>>>> bf16b90... Reduced glove vocabs, fixed some architectures
     if os.path.isfile(Params.data_dir + "glove.np"): exit()
-    load_glove(Params.glove_dir,"glove",vocab_size = Params.vocab_size)
-    load_glove(Params.glove_char,"glove_char", vocab_size = Params.char_vocab_size)
+    print(loader.w_count)
+    print(loader.c_count)
+    load_glove(Params.glove_dir,"glove",vocab_size = loader.w_count)
+    load_glove(Params.glove_char,"glove_char", vocab_size = loader.c_count)
     print("Processing complete")
     print("Unknown word ratio: {} / {}".format(loader.w_unknown_count,loader.w_occurence))
     print("Unknown character ratio: {} / {}".format(loader.c_unknown_count,loader.c_occurence))

@@ -27,9 +27,9 @@ $ python model.py
 To test or debug your model after training, change mode = "train" from params.py file and run the model.
 
 ## TODO's
-- [x] Training and testing the model
 - [x] Add trilinear function to Context-to-Query attention
-- [x] Convergence testing
+- [x] Add learning rate warmup
+- [ ] Convergence testing
 - [ ] Apply dropout every 2 layers
 - [ ] Query-to-context attention
 - [ ] Data augmentation by paraphrasing
