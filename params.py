@@ -24,7 +24,7 @@ class Params():
     p_chars_dir = "chars_context.txt"
 
     # Training
-    mode = "test" # case-insensitive options: ["train", "test", "debug"]
+    mode = "train" # case-insensitive options: ["train", "test", "debug"]
     initialLearningRate = 1e-3
     dropout = None # dropout probability, if None, don't use dropout
     decay = 0.9999 # decay rate of the exponential moving average
