@@ -27,6 +27,7 @@ def str2bool(v):
 
 parser = argparse.ArgumentParser()
 parser.add_argument('-p','--process', default = False, type = str2bool, help='Use the coreNLP tokenizer.', required=False)
+parser.add_argument('-r','--reduce_glove', default = False, type = str2bool, help='Reduce glove size.', required=False)
 args = parser.parse_args()
 
 if args.process:
@@ -40,7 +41,7 @@ if args.process:
 
 class data_loader(object):
     def __init__(self,use_pretrained = None):
-        self.c_dict = {"_UNK":0, "_PAD":0}
+        self.c_dict = {"_UNK":0, "_PAD":1}
         self.w_dict = {"_UNK":0}
         self.w_occurence = 0
         self.c_occurence = 0
@@ -54,7 +55,7 @@ class data_loader(object):
         if use_pretrained:
             self.append_dict = False
             self.w_dict, self.w_count = self.process_glove(Params.glove_dir, self.w_dict, self.w_count, Params.emb_size)
-            self.c_dict, self.c_count = self.process_glove(Params.glove_char, self.c_dict, self.c_count, Params.char_emb_size)
+            self.c_dict, self.c_count = self.process_glove(Params.glove_char, self.c_dict, self.c_count, 300)
             self.ids2word = {v: k for k, v in self.w_dict.iteritems()}
             self.ids2char = {v: k for k, v in self.c_dict.iteritems()}
 
@@ -93,16 +94,16 @@ class data_loader(object):
             print("")
         return dict_, count
 
-    def process_json(self,file_dir,out_dir):
+    def process_json(self,file_dir,out_dir, write_ = True):
         if not os.path.exists(out_dir):
             os.makedirs(out_dir)
         self.data = json.load(codecs.open(file_dir,"rb","utf-8"))
-        self.loop(self.data, out_dir)
+        self.loop(self.data, out_dir, write_ = write_)
         with codecs.open("dictionary.txt","wb","utf-8") as f:
             for key, value in sorted(self.w_dict.iteritems(), key=lambda (k,v): (v,k)):
                 f.write("%s: %s" % (key, value) + "\n")
 
-    def loop(self, data, dir_ = Params.train_dir):
+    def loop(self, data, dir_ = Params.train_dir, write_ = True):
         for topic in tqdm(data['data'],total = len(data['data'])):
             for para in topic['paragraphs']:
 
@@ -121,11 +122,12 @@ class data_loader(object):
                     if start_i == -1:
                         self.invalid_q += 1
                         continue
-                    write_file([str(start_i),str(finish_i)],dir_ + Params.target_dir)
-                    write_file(words,dir_ + Params.q_word_dir)
-                    write_file(chars,dir_ + Params.q_chars_dir)
-                    write_file(words_c,dir_ + Params.p_word_dir)
-                    write_file(chars_c,dir_ + Params.p_chars_dir)
+                    if write_:
+                        write_file([str(start_i),str(finish_i)],dir_ + Params.target_dir)
+                        write_file(words,dir_ + Params.q_word_dir)
+                        write_file(chars,dir_ + Params.q_chars_dir)
+                        write_file(words_c,dir_ + Params.p_word_dir)
+                        write_file(chars_c,dir_ + Params.p_chars_dir)
 
     def process_word(self,line):
         for word in line:
@@ -203,6 +205,36 @@ def load_glove(dir_, name, vocab_size):
     glove_map = np.memmap(Params.data_dir + name + ".np", dtype='float32', mode='write', shape=(vocab_size,Params.emb_size))
     glove_map[:] = glove
     del glove_map
+
+def reduce_glove(dir_, dict_):
+    glove_f = []
+    with codecs.open(dir_, "rb", "utf-8") as f:
+        line = f.readline()
+        i = 0
+        while line:
+	    i += 1
+            if i % 100 == 0:
+                sys.stdout.write("\rProcessing %d vocabs"%i)
+            vector = line.split(" ")
+            if len(vector) != Params.emb_size + 1:
+                line = f.readline()
+                continue
+            vocab = normalize_text(''.join(vector[0:-Params.emb_size]).decode("utf-8"))
+            if vocab not in dict_:
+                line = f.readline()
+                continue
+            glove_f.append(line)
+            line = f.readline()
+    print("\nTotal number of lines: {}\nReduced vocab size: {}".format(i, len(glove_f)))
+    with codecs.open(dir_, "wb", "utf-8") as f:
+        i = 1
+        for line in glove_f[:-1]:
+            f.write(line)
+        f.write(glove_f[-1].strip("\n"))
+        if i % 100 == 0:
+            sys.stdout.write("\rProcessing %d vocabs"%i)
+        i += 1
+
 
 def find_answer_index(context, answer):
     window_len = len(answer)
@@ -313,14 +345,21 @@ def max_value(inputlist):
     return max_val
 
 def main():
-    with open(Params.data_dir + 'dictionary.pkl','wb') as dictionary:
-        loader = data_loader(use_pretrained = True)
-        print("Tokenizing training data.")
-        loader.process_json(Params.data_dir + "train-v1.1.json", out_dir = Params.train_dir)
-        print("Tokenizing dev data.")
-        loader.process_json(Params.data_dir + "dev-v1.1.json", out_dir = Params.dev_dir)
-        pickle.dump(loader, dictionary, pickle.HIGHEST_PROTOCOL)
-    print("Tokenizing complete")
+    if args.reduce_glove:
+        print("Reducing Glove Matrix")
+        loader = data_loader(use_pretrained = False)
+        loader.process_json(Params.data_dir + "train-v1.1.json", out_dir = Params.train_dir, write_ = False)
+        loader.process_json(Params.data_dir + "dev-v1.1.json", out_dir = Params.dev_dir, write_ = False)
+        reduce_glove(Params.glove_dir, loader.w_dict)
+    if args.process:
+        with open(Params.data_dir + 'dictionary.pkl','wb') as dictionary:
+            loader = data_loader(use_pretrained = True)
+            print("Tokenizing training data.")
+            loader.process_json(Params.data_dir + "train-v1.1.json", out_dir = Params.train_dir)
+            print("Tokenizing dev data.")
+            loader.process_json(Params.data_dir + "dev-v1.1.json", out_dir = Params.dev_dir)
+            pickle.dump(loader, dictionary, pickle.HIGHEST_PROTOCOL)
+            print("Tokenizing complete")
     if os.path.isfile(Params.data_dir + "glove.np"): exit()
     load_glove(Params.glove_dir,"glove",vocab_size = Params.vocab_size)
     load_glove(Params.glove_char,"glove_char", vocab_size = Params.char_vocab_size)

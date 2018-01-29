@@ -52,11 +52,9 @@ class Model(object):
 
 	def encode_ids(self):
 		with tf.variable_scope("Input_Embedding_Layer"):
-			self.unknown_char_embeddings = tf.get_variable("unknown_char_embeddings", (1, Params.emb_size),dtype = tf.float32, initializer = initializer())
-			self.char_embeddings = tf.get_variable("char_embeddings", (Params.char_vocab_size, Params.emb_size), dtype = tf.float32, initializer = initializer())
-			self.char_embeddings = tf.concat((self.unknown_char_embeddings, self.char_embeddings),axis = 0)
 			with tf.device('/cpu:0'):
-				self.word_embeddings_ = tf.Variable(tf.constant(0.0, shape=[Params.vocab_size, Params.emb_size]),trainable=False, name="word_embeddings")
+				self.char_embeddings = tf.get_variable("char_embeddings", (Params.char_vocab_size+1, Params.char_emb_size), dtype = tf.float32, initializer = initializer())
+				self.word_embeddings = tf.Variable(tf.constant(0.0, shape=[Params.vocab_size, Params.emb_size]),trainable=False, name="word_embeddings")
 				self.word_embeddings_placeholder = tf.placeholder(tf.float32,[Params.vocab_size, Params.emb_size],"word_embeddings_placeholder")
 				self.emb_assign = tf.assign(self.word_embeddings_, self.word_embeddings_placeholder)
 				self.word_embeddings = tf.concat((self.unknown_word_embeddings, self.word_embeddings_),axis = 0)
@@ -82,14 +80,14 @@ class Model(object):
 
 	def embedding_encoder(self):
 		with tf.variable_scope("Embedding_Encoder_Layer"):
-			self.passage_context = residual_block(self.passage_encoding, num_blocks = 1, num_conv_layers = 4, kernel_size = 5, num_filters = Params.num_units, input_projection = True, seq_len = self.passage_len, scope = "Encoder_Residual_Block", is_training = self.is_training, reuse = False, bias = False)
-			self.question_context = residual_block(self.question_encoding, num_blocks = 1, num_conv_layers = 4, kernel_size = 5, num_filters = Params.num_units, input_projection = True, seq_len = self.question_len, scope = "Encoder_Residual_Block", is_training = self.is_training, reuse = True, bias = False)
+			self.passage_context = residual_block(self.passage_encoding, num_blocks = 1, num_conv_layers = 4, kernel_size = 7, num_filters = Params.num_units, input_projection = True, seq_len = self.passage_len, scope = "Encoder_Residual_Block", is_training = self.is_training, reuse = False, bias = False)
+			self.question_context = residual_block(self.question_encoding, num_blocks = 1, num_conv_layers = 4, kernel_size = 7, num_filters = Params.num_units, input_projection = True, seq_len = self.question_len, scope = "Encoder_Residual_Block", is_training = self.is_training, reuse = True, bias = False)
 
 	def context_to_query(self):
 		with tf.variable_scope("Context_to_Query_Attention_Layer"):
 			P = tf.tile(tf.expand_dims(self.passage_context,2),[1,1,Params.max_q_len,1])
 			Q = tf.tile(tf.expand_dims(self.question_context,1),[1,Params.max_p_len,1,1])
-			S = tf.squeeze(trilinear([P, Q, P*Q], 1, bias = Params.bias, scope = "trilinear"))
+			S = tf.squeeze(trilinear([P, Q, P*Q], 1, bias = Params.bias, scope = "trilinear",is_training = self.is_training))
 			S_ = tf.nn.softmax(mask_logits(S, self.question_len))
 			self.c2q_attention = tf.matmul(S_, self.question_context)
 			if self.is_training and Params.dropout is not None:
@@ -102,24 +100,23 @@ class Model(object):
 			for i in range(3):
 				if self.is_training and Params.dropout is not None:
 					self.encoder_outputs[i] = tf.nn.dropout(self.encoder_outputs[i], 1.0 - Params.dropout)
-				self.encoder_outputs.append(residual_block(self.encoder_outputs[i], num_blocks = 7, num_conv_layers = 2, kernel_size = 7, num_filters = Params.num_units, seq_len = self.passage_len, scope = "Model_Encoder", reuse = True if i > 0 else None))
+				self.encoder_outputs.append(residual_block(self.encoder_outputs[i], num_blocks = 7, num_conv_layers = 2, kernel_size = 5, num_filters = Params.num_units, seq_len = self.passage_len, scope = "Model_Encoder", reuse = True if i > 0 else None))
 
 	def output_layer(self):
 		with tf.variable_scope("Output_Layer"):
 			self.start_logits = tf.layers.dense(tf.concat([self.encoder_outputs[1], self.encoder_outputs[2]],axis = -1),1, use_bias = False, name = "start_pointer")
 			self.end_logits = tf.layers.dense(tf.concat([self.encoder_outputs[1], self.encoder_outputs[3]],axis = -1),1, use_bias = False, name = "end_pointer")
 			logits = tf.stack([self.start_logits, self.end_logits],axis = 1)
-			self.logits = tf.nn.softmax(tf.squeeze(logits))
+			logits = mask_logits(tf.squeeze(logits), self.passage_len)
+			self.logits = tf.nn.softmax(logits)
+			self.output_index = tf.argmax(self.logits, axis = -1)
 
 	def loss_function(self):
 		with tf.variable_scope("loss"):
 			shapes = self.passage_w.shape
-			self.indices_prob = tf.split(tf.one_hot(self.indices, shapes[1]),2,axis = 1)
-			# self.mean_loss = cross_entropy(self.logits, self.indices_prob)
-			#self.mean_loss = tf.reduce_mean(tf.reduce_sum(tf.nn.softmax_cross_entropy_with_logits(labels = self.indices_prob, logits = self.logits),axis = -1))
-			ce_1 = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels = tf.squeeze(self.indices_prob[0]), logits = tf.squeeze(self.start_logits)))
-			ce_2 = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels = tf.squeeze(self.indices_prob[1]), logits = tf.squeeze(self.end_logits)))
-			self.mean_loss = ce_1 + ce_2
+			self.indices_prob = tf.one_hot(self.indices, shapes[1])
+			# self.mean_loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits = self.logits, labels = self.indices_prob))
+			self.mean_loss = cross_entropy(self.logits, self.indices_prob)
 
 			# apply ema
 			if Params.decay is not None:
@@ -129,10 +126,13 @@ class Model(object):
 		            with tf.control_dependencies([ema_op]):
 		                self.mean_loss = tf.identity(self.mean_loss)
 
-			self.optimizer = optimizer_factory[Params.optimizer](**Params.opt_arg[Params.optimizer])
+			# learning rate warmup scheme
+			self.warmup_scheme = tf.minimum(Params.initialLearningRate, tf.exp(1e-6 * tf.cast(self.global_step, tf.float32)) - 1)
+			# self.warmup_scheme = (Params.num_units ** -0.5) * tf.minimum((tf.cast(self.global_step,tf.float32)**-0.5), tf.cast(self.global_step, tf.float32)*(Params.warmup_steps ** -1.5))
+			self.optimizer = optimizer_factory[Params.optimizer](learning_rate = self.warmup_scheme, **Params.opt_arg[Params.optimizer])
 
+			# gradient clipping by norm
 			if Params.clip:
-				# gradient clipping by norm
 				gradients, variables = zip(*self.optimizer.compute_gradients(self.mean_loss))
 				gradients, _ = tf.clip_by_global_norm(gradients, Params.norm)
 				self.train_op = self.optimizer.apply_gradients(zip(gradients, variables), global_step = self.global_step)
@@ -151,30 +151,30 @@ class Model(object):
 		tf.summary.scalar('loss_dev', self.dev_loss)
 		tf.summary.scalar("F1_Score",self.F1)
 		tf.summary.scalar("Exact_Match",self.EM)
-		tf.summary.scalar('learning_rate', Params.opt_arg[Params.optimizer]['learning_rate'])
+		tf.summary.scalar('learning_rate', self.warmup_scheme)
 		self.merged = tf.summary.merge_all()
 
 def debug():
 	model = Model(is_training = True)
 	print("Built model")
 
-# def test():
-# 	model = Model(is_training = False); print("Built model")
-# 	dict_ = pickle.load(open(Params.data_dir + "dictionary.pkl","r"))
-# 	with model.graph.as_default():
-# 		sv = tf.train.Supervisor()
-# 		with sv.managed_session() as sess:
-# 			sv.saver.restore(sess, tf.train.latest_checkpoint(Params.logdir))
-# 			EM, F1 = 0.0, 0.0
-# 			for step in tqdm(range(model.num_batch), total = model.num_batch, ncols=70, leave=False, unit='b'):
-# 				index, ground_truth, passage = sess.run([model.output_index, model.indices, model.passage_w])
-# 				for batch in range(Params.batch_size):
-# 					f1, em = f1_and_EM(index[batch], ground_truth[batch], passage[batch], dict_)
-# 					F1 += f1
-# 					EM += em
-# 			F1 /= float(model.num_batch * Params.batch_size)
-# 			EM /= float(model.num_batch * Params.batch_size)
-# 			print("Exact_match: {}\nF1_score: {}".format(EM,F1))
+def test():
+	model = Model(is_training = False); print("Built model")
+	dict_ = pickle.load(open(Params.data_dir + "dictionary.pkl","r"))
+	with model.graph.as_default():
+		sv = tf.train.Supervisor()
+		with sv.managed_session() as sess:
+			sv.saver.restore(sess, tf.train.latest_checkpoint(Params.logdir))
+			EM, F1 = 0.0, 0.0
+			for step in tqdm(range(model.num_batch), total = model.num_batch, ncols=70, leave=False, unit='b'):
+				index, ground_truth, passage = sess.run([model.output_index, model.indices, model.passage_w])
+				for batch in range(Params.batch_size):
+					f1, em = f1_and_EM(index[batch], ground_truth[batch], passage[batch], dict_)
+					F1 += f1
+					EM += em
+			F1 /= float(model.num_batch * Params.batch_size)
+			EM /= float(model.num_batch * Params.batch_size)
+			print("Exact_match: {}\nF1_score: {}".format(EM,F1))
 
 def main():
 	model = Model(is_training = True); print("Built model")
@@ -196,8 +196,10 @@ def main():
 			if init: sess.run(model.emb_assign, {model.word_embeddings_placeholder:glove})
 			for epoch in range(1, Params.num_epochs+1):
 				if sv.should_stop(): break
+				train_loss = []
 				for step in tqdm(range(model.num_batch), total = model.num_batch, ncols=70, leave=False, unit='b'):
-					sess.run(model.train_op)
+					_, loss = sess.run([model.train_op, model.mean_loss])
+					train_loss.append(loss)
 					if step % Params.save_steps == 0:
 						gs = sess.run(model.global_step)
 						sv.saver.save(sess, Params.logdir + '/model_epoch_%d_step_%d'%(gs//model.num_batch, gs%model.num_batch))
@@ -213,7 +215,8 @@ def main():
 						F1 /= float(Params.batch_size)
 						EM /= float(Params.batch_size)
 						sess.run(model.metric_assign,{model.F1_placeholder: F1, model.EM_placeholder: EM, model.dev_loss_placeholder: dev_loss})
-						print("\nDev_loss: {}\nDev_Exact_match: {}\nDev_F1_score: {}".format(dev_loss,EM,F1))
+						print("\nTrain_loss: {}\nDev_loss: {}\nDev_Exact_match: {}\nDev_F1_score: {}".format(np.mean(train_loss),dev_loss,EM,F1))
+						train_loss = []
 
 # def get_best_index(logits):
 # 	p1,p2 = [np.squeeze(logit) for logit in np.split(logits,2,axis=1)]
@@ -229,9 +232,9 @@ if __name__ == '__main__':
 	if Params.mode.lower() == "debug":
 		print("Debugging...")
 		debug()
-	# elif Params.mode.lower() == "test":
-	# 	print("Testing on dev set...")
-	# 	test()
+	elif Params.mode.lower() == "test":
+		print("Testing on dev set...")
+		test()
 	elif Params.mode.lower() == "train":
 		print("Training...")
 		main()
