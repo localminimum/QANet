@@ -121,17 +121,19 @@ class data_loader(object):
                     if len(words) >= Params.max_q_len:
                         continue
                     ans = qas['answers'][0]
-                    ans_ids,_ = self.add_to_dict(ans['text'])
-                    (start_i, finish_i) = find_answer_index(words_c, ans_ids)
-                    if start_i == -1:
-                        self.invalid_q += 1
-                        continue
-                    if write_:
-                        write_file([str(start_i),str(finish_i)],dir_ + Params.target_dir)
-                        write_file(words,dir_ + Params.q_word_dir)
-                        write_file(chars,dir_ + Params.q_chars_dir)
-                        write_file(words_c,dir_ + Params.p_word_dir)
-                        write_file(chars_c,dir_ + Params.p_chars_dir)
+					ans_ids,_ = self.add_to_dict(ans['text'])
+					answers = find_answer_index(words_c, ans_ids)
+					for answer in answers:
+						start_i, finish_i = answer
+						if start_i == -1:
+							self.invalid_q += 1
+							continue
+						if write_:
+							write_file([str(start_i),str(finish_i)],dir_ + Params.target_dir)
+							write_file(words,dir_ + Params.q_word_dir)
+							write_file(chars,dir_ + Params.q_chars_dir)
+							write_file(words_c,dir_ + Params.p_word_dir)
+							write_file(chars_c,dir_ + Params.p_chars_dir)
 
     def process_word(self,line):
         for word in line:
@@ -254,16 +256,22 @@ def reduce_glove(dir_, dict_):
 >>>>>>> bf16b90... Reduced glove vocabs, fixed some architectures
 
 def find_answer_index(context, answer):
-    window_len = len(answer)
-    if window_len == 1:
-        if answer[0] in context:
-            return (context.index(answer[0]), context.index(answer[0]))
-        else:
-            return (-1, -1)
-    for i in range(len(context)):
-        if context[i:i+window_len] == answer:
-            return (i, i + window_len)
-    return (-1, -1)
+	window_len = len(answer)
+	answers = []
+	if window_len == 1:
+		indices = [i for i, ctx in enumerate(context) if ctx == answer[0]]
+		for i in indices:
+			answers.append((i,i))
+		if not indices:
+			answers.append((-1,-1))
+		return answers
+	for i in range(len(context)):
+		if context[i:i+window_len] == answer:
+			answers.append((i, i + window_len))
+	if len(answers) == 0:
+		return [(-1, -1)]
+	else:
+		return answers
 
 def normalize_text(text):
     return unicodedata.normalize('NFD', text)
