@@ -1,5 +1,5 @@
 # FAST AND ACCURATE READING COMPREHENSION WITHOUT RECURRENT NETWORKS
-A Tensorflow implementation of https://openreview.net/pdf?id=B14TlG-RW. Without RNNs the model converges relatively fast compared to [R-net](https://github.com/minsangkim142/R-net). The model converges to devset EM/F1 score of 44/58 within 1 hour of training without dropout in GTX1080 with given parameters in param.py file.
+A Tensorflow implementation of https://openreview.net/pdf?id=B14TlG-RW. Without RNNs the model converges relatively fast compared to [R-net](https://github.com/minsangkim142/R-net). After 12 epochs of training our model reaches dev EM/F1 = 56 / 69.
 
 ## Dataset
 The dataset used for this task is Stanford Question Answering Dataset (https://rajpurkar.github.io/SQuAD-explorer/). Pretrained GloVe embeddings obtained from common crawl with 840B tokens are used for words (https://nlp.stanford.edu/projects/glove/).
