@@ -139,10 +139,10 @@ class Model(object):
             self.start_logits = conv(tf.concat([self.encoder_outputs[1], self.encoder_outputs[2]],axis = -1),1, bias = False, name = "start_pointer")
             self.end_logits = conv(tf.concat([self.encoder_outputs[1], self.encoder_outputs[3]],axis = -1),1, bias = False, name = "end_pointer")
             logits = tf.stack([self.start_logits, self.end_logits],axis = 1)
-            logits = mask_logits(tf.squeeze(logits), self.passage_len)
-            self.logits = tf.nn.softmax(logits)
+            self.logits = mask_logits(tf.squeeze(logits), self.passage_len)
+            # self.logits = tf.nn.softmax(logits)
 
-            self.logit_1, self.logit_2 = tf.split(self.logits, 2, axis = 1)
+            self.logit_1, self.logit_2 = tf.split(tf.nn.softmax(self.logits), 2, axis = 1)
             self.logit_1 = tf.transpose(self.logit_1, [0, 2, 1])
             self.dp = tf.matmul(self.logit_1, self.logit_2)
             self.dp = tf.matrix_band_part(self.dp, 0, 15)
@@ -154,9 +154,12 @@ class Model(object):
     def loss_function(self):
         with tf.variable_scope("loss"):
             shapes = self.passage_w.shape
-            self.indices_prob = tf.one_hot(self.indices, shapes[1])
-            # self.mean_loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits = self.logits, labels = self.indices_prob))
-            self.mean_loss = cross_entropy(self.logits, self.indices_prob)
+            self.indices_prob = [tf.squeeze(i, 1) for i in tf.split(tf.one_hot(self.indices, shapes[1]), 2, axis = 1)]
+            self.logits = [tf.squeeze(l, 1) for l in tf.split(self.logits, 2, axis = 1)]
+
+            self.mean_losses = [tf.nn.softmax_cross_entropy_with_logits(logits = l, labels = i) for l,i in zip(self.logits, self.indices_prob)]
+            self.mean_loss = tf.reduce_mean(sum(self.mean_losses))
+            # self.mean_loss = cross_entropy(self.logits, self.indices_prob)
 
             if Params.l2_norm is not None:
                 variables = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)
@@ -217,6 +220,7 @@ def test():
                     f1, em = f1_and_EM(index[batch], ground_truth[batch], passage[batch], dict_)
                     F1 += f1
                     EM += em
+                exit()
             F1 /= float(model.num_batch * Params.batch_size)
             EM /= float(model.num_batch * Params.batch_size)
             print("Exact_match: {}\nF1_score: {}".format(EM,F1))
@@ -243,7 +247,7 @@ def main():
                 if sv.should_stop(): break
                 train_loss = []
                 for step in tqdm(range(model.num_batch), total = model.num_batch, ncols=70, leave=False, unit='b'):
-                    _, loss = sess.run([model.train_op, model.mean_loss],
+                    test, _, loss = sess.run([model.mean_losses, model.train_op, model.mean_loss],
                                         feed_dict={model.dropout: Params.dropout if Params.dropout is not None else 0.0})
                     train_loss.append(loss)
                     if step % Params.save_steps == 0:

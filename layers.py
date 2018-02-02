@@ -128,7 +128,7 @@ def conv(inputs, output_size, bias = None, activation = None, name = "conv", reu
         else:
             return outputs
 
-def mask_logits(inputs, sequence_length, mask_value = -1e7):
+def mask_logits(inputs, sequence_length, mask_value = -1e30):
     shapes = inputs.shape.as_list()
     mask = tf.reshape(
                      tf.sequence_mask(sequence_length,
