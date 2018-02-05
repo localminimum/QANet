@@ -134,8 +134,6 @@ class Model(object):
 
     def output_layer(self):
         with tf.variable_scope("Output_Layer"):
-            # self.start_logits = tf.layers.dense(tf.concat([self.encoder_outputs[1], self.encoder_outputs[2]],axis = -1),1, use_bias = False, name = "start_pointer")
-            # self.end_logits = tf.layers.dense(tf.concat([self.encoder_outputs[1], self.encoder_outputs[3]],axis = -1),1, use_bias = False, name = "end_pointer")
             self.start_logits = conv(tf.concat([self.encoder_outputs[1], self.encoder_outputs[2]],axis = -1),1, bias = False, name = "start_pointer")
             self.end_logits = conv(tf.concat([self.encoder_outputs[1], self.encoder_outputs[3]],axis = -1),1, bias = False, name = "end_pointer")
             logits = tf.stack([self.start_logits, self.end_logits],axis = 1)
@@ -149,7 +147,6 @@ class Model(object):
             self.output_index_1 = tf.argmax(tf.reduce_max(self.dp, axis = 2), -1)
             self.output_index_2 = tf.argmax(tf.reduce_max(self.dp, axis = 1), -1)
             self.output_index = tf.stack([self.output_index_1, self.output_index_2], axis = 1)
-            # self.output_index_greedy = tf.argmax(self.logits, axis = 2)
 
     def loss_function(self):
         with tf.variable_scope("loss"):
