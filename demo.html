@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta charset="UTF-8"> 
+        <script>
+            function hit(passage, question){
+                var xhr = new XMLHttpRequest();
+                xhr.open("POST", '/answer', true);
+                xhr.setRequestHeader("Content-type", "application/json");
+                xhr.onreadystatechange = function () {
+                    console.log(xhr.status);
+                    if (xhr.readyState === 4 && xhr.status === 200) {
+                        var json = JSON.parse(xhr.responseText);
+                        console.log(json.answer);
+                        var ans = document.getElementById("answer");
+                        ans.innerHTML = json.answer;
+                    }
+                };
+                var params = JSON.stringify({"question": question, "passage": passage});
+                xhr.send(params);
+                console.log("sent");
+            }
+        </script>
+        <style>
+            body{
+                display: grid;
+                grid-template-columns: 7fr 3fr;
+                grid-template-rows: 9fr 1fr;
+            }
+        </style>
+    </head>
+    <body>
+        <textarea id='passage' placeholder='Your passage here'></textarea>
+        <textarea id='question' placeholder='Your Question here'></textarea>
+        <p id='answer'>Your answer appears here</p>
+        <button id='GetAnswer'>Get Answer</button>
+        <script>
+            var button = document.getElementById("GetAnswer");
+            button.onclick = function (){
+                var para = document.getElementById("passage");
+                var ques = document.getElementById("question");
+                console.log("hitting");
+                hit(para.value, ques.value);
+
+            };
+        </script>
+    </body>
+</html>

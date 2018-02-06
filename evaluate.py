@@ -20,6 +20,7 @@ def f1_and_EM(index, ground_truth, passage, dict_):
         answer_ind = passage[ground_truth[0]:ground_truth[1]].tolist()
     answer = dict_.ind2word(pred_ind)
     answer_ = dict_.ind2word(answer_ind)
+    #print("\ngt: {}\npredict: {}".format(answer_, answer))
     f1 = f1_score(answer,answer_)
     EM = exact_match_score(answer,answer_)
     return f1, EM

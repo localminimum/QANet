@@ -112,18 +112,19 @@ class _FuncQueueRunner(tf.train.QueueRunner):
                     self._runs_per_session[sess] -= 1
 
 def load_data(dir_):
+    dict_ = pickle.load(open(Params.data_dir + "dictionary.pkl","r"))
     # Target indices
     indices = load_target(dir_ + Params.target_dir)
 
     # Load question data
     print("Loading question data...")
-    q_word_ids, _ = load_word(dir_ + Params.q_word_dir)
-    q_char_ids, q_char_len, q_word_len = load_char(dir_ + Params.q_chars_dir)
+    q_word_ids, q_word_len = load_word(dir_ + Params.q_word_dir)
+    q_char_ids, q_char_len, _ = load_char(dir_ + Params.q_chars_dir)
 
     # Load passage data
     print("Loading passage data...")
-    p_word_ids, _ = load_word(dir_ + Params.p_word_dir)
-    p_char_ids, p_char_len, p_word_len = load_char(dir_ + Params.p_chars_dir)
+    p_word_ids, p_word_len = load_word(dir_ + Params.p_word_dir)
+    p_char_ids, p_char_len, _ = load_char(dir_ + Params.p_chars_dir)
 
     # Get max length to pad
     p_max_word = Params.max_p_len#np.max(p_word_len)
@@ -140,24 +141,19 @@ def load_data(dir_):
 
     # to numpy
     indices = np.reshape(np.asarray(indices,np.int32),(-1,2))
-    p_word_len = np.reshape(np.asarray(p_word_len,np.int32),(-1,1)) + 1
-    q_word_len = np.reshape(np.asarray(q_word_len,np.int32),(-1,1))
 
     # shapes of each data
     shapes=[(p_max_word,),(q_max_word,),
             (p_max_word,p_max_char,),(q_max_word,q_max_char,),
-            (1,),(1,),
             (2,)]
 
     return ([p_word_ids, q_word_ids,
             p_char_ids, q_char_ids,
-            p_word_len, q_word_len,
             indices], shapes)
 
 def get_dev():
     devset, shapes = load_data(Params.dev_dir)
     indices = devset[-1]
-    # devset = [np.reshape(input_, shapes[i]) for i,input_ in enumerate(devset)]
 
     dev_ind = np.arange(indices.shape[0],dtype = np.int32)
     np.random.shuffle(dev_ind)
@@ -189,7 +185,7 @@ def get_batch(is_training = True):
             return [np.reshape(input_[ind], shapes[i]) for i,input_ in enumerate(input_list)]
 
         data = get_data(inputs=ind_list,
-                        dtypes=[np.int32]*7,
+                        dtypes=[np.int32]*5,
                         capacity=Params.batch_size*8,
                         num_threads=2)
 
