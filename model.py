@@ -53,11 +53,13 @@ class Model(object):
 
     def encode_ids(self):
         with tf.variable_scope("Input_Embedding_Layer"):
+            self.unknown = tf.get_variable("unknown_word", (1, Params.emb_size), dtype = tf.float32, initializer = initializer())
             with tf.device('/cpu:0'):
                 self.char_embeddings = tf.get_variable("char_embeddings", (Params.char_vocab_size+1, Params.char_emb_size), dtype = tf.float32, initializer = initializer())
                 self.word_embeddings = tf.Variable(tf.constant(0.0, shape=[Params.vocab_size, Params.emb_size]),trainable=False, name="word_embeddings")
                 self.word_embeddings_placeholder = tf.placeholder(tf.float32,[Params.vocab_size, Params.emb_size],"word_embeddings_placeholder")
                 self.emb_assign = tf.assign(self.word_embeddings, self.word_embeddings_placeholder)
+                self.word_embeddings = tf.concat([self.unknown, self.word_embeddings], axis = 0)
 
             # Embed the question and passage information for word and character tokens
             self.passage_word_encoded, self.passage_char_encoded = encoding(self.passage_w,
@@ -82,6 +84,8 @@ class Model(object):
 
             # self.passage_encoding = highway(self.passage_encoding, 128, project = True, scope = "highway", reuse = None)
             # self.question_encoding = highway(self.question_encoding, 128, project = True, scope = "highway", reuse = True)
+            self.passage_encoding = tf.nn.dropout(highway(self.passage_encoding, scope = "highway", reuse = None), 1.0 - self.dropout)
+            self.question_encoding = tf.nn.dropout(highway(self.question_encoding, scope = "highway", reuse = True), 1.0 - self.dropout)
 
     def embedding_encoder(self):
         with tf.variable_scope("Embedding_Encoder_Layer"):
@@ -157,6 +161,8 @@ class Model(object):
             self.mean_losses = [tf.nn.softmax_cross_entropy_with_logits(logits = l, labels = i) for l,i in zip(self.logits, self.indices_prob)]
             self.mean_loss = tf.reduce_mean(sum(self.mean_losses))
             # self.mean_loss = cross_entropy(self.logits, self.indices_prob)
+            self.mean_losses = [tf.nn.softmax_cross_entropy_with_logits_v2(logits = l, labels = i) for l,i in zip(self.logits, self.indices_prob)]
+            self.mean_loss = tf.reduce_mean(sum(self.mean_losses))
 
             if Params.l2_norm is not None:
                 variables = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)

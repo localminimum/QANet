@@ -1,8 +1,11 @@
 # FAST AND ACCURATE READING COMPREHENSION WITHOUT RECURRENT NETWORKS
-A Tensorflow implementation of https://openreview.net/pdf?id=B14TlG-RW. Without RNNs the model converges relatively fast compared to [R-net](https://github.com/minsangkim142/R-net). After 12 epochs of training our model reaches dev EM/F1 = 56 / 69.
+A Tensorflow implementation of Google's [Fast Reading Comprehension](https://openreview.net/pdf?id=B14TlG-RW).
+Without RNNs the model converges relatively fast compared to [R-net](https://github.com/minsangkim142/R-net).
+After 12 epochs of training our model reaches dev EM/F1 = 56 / 69.
 
 ## Dataset
-The dataset used for this task is Stanford Question Answering Dataset (https://rajpurkar.github.io/SQuAD-explorer/). Pretrained GloVe embeddings obtained from common crawl with 840B tokens are used for words (https://nlp.stanford.edu/projects/glove/).
+The dataset used for this task is [Stanford Question Answering Dataset](https://rajpurkar.github.io/SQuAD-explorer/).
+Pretrained [GloVe embeddings](https://nlp.stanford.edu/projects/glove/) obtained from common crawl with 840B tokens are used for words.
 
 ## Requirements
   * Python2.7
@@ -12,7 +15,8 @@ The dataset used for this task is Stanford Question Answering Dataset (https://r
   * spacy
 
 ## Downloads and Setup
-Preprocessing step is identical to R-net (https://github.com/minsangkim142/R-net). Once you clone this repo, run the following lines from bash **just once** to process the dataset (SQuAD).
+Preprocessing step is identical to [R-net](https://github.com/minsangkim142/R-net).
+Once you clone this repo, run the following lines from bash **just once** to process the dataset (SQuAD).
 ```shell
 $ pip install -r requirements.txt
 $ bash setup.sh
@@ -44,4 +48,4 @@ $ tensorboard --logdir=./
 **28/01/18**
 The model reaches devset performance of EM/F1=44/58 1 hour into training without dropout. Next goal is to train with dropout every 2 layers.
 **04/11/17**
-Currently the model is not optimized and there is a memory leak so I strongly suggest only training if your memory is 16GB >. Also I haven't done convergence testing yet. The training time is 5 ~ 6x faster on naive implementation compared to R-net (https://github.com/minsangkim142/R-net).
+Currently the model is not optimized and there is a memory leak so I strongly suggest only training if your memory is 16GB >. Also I haven't done convergence testing yet. The training time is 5 ~ 6x faster on naive implementation compared to [R-net](https://github.com/minsangkim142/R-net).

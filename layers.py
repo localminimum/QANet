@@ -44,7 +44,10 @@ def encoding(word, char, word_embeddings, char_embeddings, scope = "embedding"):
     char_encoding = tf.nn.embedding_lookup(char_embeddings, char)
     return word_encoding, char_encoding
 
-def residual_block(inputs, num_blocks, num_conv_layers, kernel_size, num_filters = Params.num_units, input_projection = False, seq_len = None, scope = "res_block", is_training = True, reuse = None, bias = Params.bias, dropout = 0.0):
+def residual_block(inputs, num_blocks, num_conv_layers, kernel_size,
+                   num_filters = Params.num_units, input_projection = False,
+                   seq_len = None, scope = "res_block", is_training = True,
+                   reuse = None, bias = Params.bias, dropout = 0.0):
     with tf.variable_scope(scope, reuse = reuse):
         if input_projection:
             inputs = conv(inputs, num_filters, name = "input_projection", reuse = reuse)
@@ -58,6 +61,17 @@ def residual_block(inputs, num_blocks, num_conv_layers, kernel_size, num_filters
         return outputs
 
 def conv_block(inputs, num_conv_layers, kernel_size, num_filters, seq_len = None, scope = "conv_block", is_training = True, reuse = None, bias = Params.bias, dropout = 0.0):
+            outputs, sublayer = conv_block(outputs, num_conv_layers, kernel_size, num_filters,
+                seq_len = seq_len, scope = "encoder_block_%d"%i,reuse = reuse, bias = bias,
+                dropout = dropout, sublayers = (sublayer, total_sublayers))
+            outputs, sublayer = self_attention_block(outputs, num_filters, seq_len,
+                scope = "self_attention_layers%d"%i, reuse = reuse, is_training = is_training,
+                bias = bias, dropout = dropout, sublayers = (sublayer, total_sublayers))
+        return outputs
+
+def conv_block(inputs, num_conv_layers, kernel_size, num_filters,
+               seq_len = None, scope = "conv_block", is_training = True,
+               reuse = None, bias = Params.bias, dropout = 0.0, sublayers = (1, 1)):
     with tf.variable_scope(scope, reuse = reuse):
         outputs = inputs
         for i in range(num_conv_layers):
@@ -69,6 +83,16 @@ def conv_block(inputs, num_conv_layers, kernel_size, num_filters, seq_len = None
         return outputs
 
 def self_attention_block(inputs, num_filters, seq_len, scope = "self_attention_ffn", reuse = None, is_training = True, bias = Params.bias, dropout = 0.0):
+            outputs = depthwise_separable_convolution(outputs,
+                kernel_size = kernel_size, num_filters = num_filters,
+                scope = "depthwise_conv_layers_%d"%i, is_training = is_training, reuse = reuse)
+            outputs = tf.nn.dropout(outputs, 1.0 - dropout * float(l) / L ) + residual
+            l += 1
+        return outputs, l
+
+def self_attention_block(inputs, num_filters, seq_len,
+                         scope = "self_attention_ffn", reuse = None, is_training = True,
+                         bias = Params.bias, dropout = 0.0, sublayers = (1, 1)):
     with tf.variable_scope(scope, reuse = reuse):
         # Self attention
         outputs = tf.contrib.layers.layer_norm(inputs, scope = "layer_norm_1", reuse = reuse)
