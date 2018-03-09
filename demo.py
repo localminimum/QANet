@@ -62,11 +62,11 @@ class Demo(object):
                     if query:
                         data, shapes = dict_.realtime_process(query)
                         fd = {m:d for i,(m,d) in enumerate(zip(model.data, data))}
-                        ids = sess.run([model.output_index], feed_dict = fd)
-                        ids = ids[0][0]
+                        ids, confidence = sess.run([model.output_index, model.dp], feed_dict = fd)
+                        ids = ids[0]
+                        confidence = confidence[0]
                         if ids[0] == ids[1]:
                             ids[1] += 1
-                        print(ids)
                         passage_t = tokenize(query[0])
                         response = " ".join(passage_t[ids[0]:ids[1]])
                         query = []

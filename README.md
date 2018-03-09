@@ -1,7 +1,8 @@
 # FAST AND ACCURATE READING COMPREHENSION WITHOUT RECURRENT NETWORKS
 A Tensorflow implementation of Google's [Fast Reading Comprehension](https://openreview.net/pdf?id=B14TlG-RW) from [ICLR2018](https://openreview.net/forum?id=B14TlG-RW).
-Without RNNs the model computes relatively quickly compared to [R-net](https://github.com/minsangkim142/R-net)(about 5 times faster in naive implementation).
-After 12 epochs of training our model reaches dev EM/F1 = 57 / 72.
+Training and preprocessing pipeline has been adopted from [R-Net by HKUST-KnowComp](https://github.com/HKUST-KnowComp/R-Net). Demo mode needs to be reimplemented. If you are here for the demo please use "dev" branch. The model reaches EM/F1 = 66/75 in 30k steps.
+
+Due to memory issue, a single head dot-product attention is used as opposed to 8 heads multi-head attention as mentioned in the original paper. Also hidden size is reduced to 96 from 128 due to memory problems in GTX1080. (8GB GPU memory is insufficient. If you have a 12GB memory GPU please share your results with us.)
 
 ![Alt text](/../master/screenshots/figure.png?raw=true "Network Outline")
 
@@ -16,29 +17,41 @@ Pretrained [GloVe embeddings](https://nlp.stanford.edu/projects/glove/) obtained
   * TensorFlow (1.2 or higher)
   * spacy
 
-## Downloads and Setup
-Preprocessing step is identical to [R-net](https://github.com/minsangkim142/R-net).
-Once you clone this repo, run the following lines from bash **just once** to process the dataset (SQuAD).
-```shell
-$ pip install -r requirements.txt
-$ bash setup.sh
-$ python process.py --process True --reduce_glove True
+## Usage
+
+To download and preprocess the data, run
+
+```bash
+# download SQuAD and Glove
+sh download.sh
+# preprocess the data
+python config.py --mode prepro
 ```
 
-## Training / Testing / Debugging / Demo
-You can change the hyperparameters from params.py file to fit the model in your GPU. To train the model, run the following line.
-To test or debug your model after training, change mode = "train" from params.py file and run the model.
-```shell
-$ python model.py
+Just like [R-Net by HKUST-KnowComp](https://github.com/HKUST-KnowComp/R-Net), hyper parameters are stored in config.py. To debug/train/test the model, run
+
+```bash
+python evaluate-v1.1.py ~/data/squad/dev-v1.1.json log/answer/answer.json
 ```
 
-**A working realtime demo is available at demo.py. To use web interface for live demo change use mode = "demo" and set batch_size to 1. (The code is taken from [R-net](https://github.com/minsangkim142/R-net))**
+The default directory for tensorboard log file is `log/event`
+
+## Detailed Implementaion
+
+  * The model adopts character level convolution - max pooling - highway network for input representations similar to [this paper by Yoon Kim](https://arxiv.org/pdf/1508.06615.pdf).
+  * Encoder consists of positional encoding - depthwise separable convolution - self attention - feed forward structure with layer norm in between.
+  * Stochastic depth dropout is used to drop the residual connection with respect to increasing depth of the network as this paper heavily relies on residual connection.
+  * Context-to-Query attention is used but Query-to-Context attention is not implemented as it is reported not to improve much on the performance.
+  * Learning rate increases from 0.0 to 0.001 in first 1000 steps in inverse exponential scale and fixed to 0.001 from 1000 steps.
+  * For regularization, dropout of 0.1 is used every 2 sub-layers and 2 blocks.
+  * During prediction, this model uses shadow variables maintained by exponential moving average of all global variables.
+  * [Taken from R-Net](https://github.com/HKUST-KnowComp/R-Net): To address efficiency issue, this implementation uses bucketing method (contributed by xiongyifan) and CudnnGRU. Due to a known bug [#13254](https://github.com/tensorflow/tensorflow/issues/13254) in Tensorflow, the weights of CudnnGRU may not be properly restored. Check the test score if you want to use it for prediction. The bucketing method can speedup the training, but will lower the F1 score by 0.3%.
+
 
 ## TODO's
 - [x] Add trilinear function to Context-to-Query attention
-- [x] Convergence testing
 - [x] Apply dropouts + stochastic depth dropout
-- [x] Realtime Demo
+- [ ] Realtime Demo
 - [ ] Query-to-context attention
 - [ ] Data augmentation by paraphrasing
 
@@ -47,15 +60,3 @@ Run tensorboard for visualisation.
 ```shell
 $ tensorboard --logdir=./
 ```
-
-![Alt text](/../master/screenshots/tensorboard.png?raw=true "Training Curve")
-
-## Note
-**2/02/18**
-The model quickly reaches EM/F1 = 55/69 on devset, but never gets beyond that even with strong regularization. Also the training speed (1.8 batch per second in GTX1080) is slower than the paper suggests (3.2 batch per second in P100).
-
-**28/01/18**
-The model reaches devset performance of EM/F1=44/58 1 hour into training without dropout. Next goal is to train with dropout every 2 layers.
-
-**04/11/17**
-Currently the model is not optimized and there is a memory leak so I strongly suggest only training if your memory is 16GB >. Also I haven't done convergence testing yet. The training time is 5 ~ 6x faster on naive implementation compared to [R-net](https://github.com/minsangkim142/R-net).

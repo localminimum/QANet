@@ -15,9 +15,9 @@ from tensorflow.python.ops import init_ops
 from tensorflow.python.ops import nn_ops
 from tensorflow.python.ops import clip_ops
 
-from params import Params
 from functools import reduce
 from operator import mul
+from params import Params
 # from common_layers import *
 
 '''
@@ -25,19 +25,26 @@ Some functions are borrowed from Tensor2Tensor Library https://github.com/tensor
 and BiDAF repository https://github.com/allenai/bi-att-flow.
 '''
 
-initializer = tf.contrib.layers.variance_scaling_initializer(factor=1.0, mode='FAN_AVG', uniform=False, seed=None, dtype=tf.float32)
-initializer_relu = tf.contrib.layers.variance_scaling_initializer(factor=2.0, mode='FAN_IN', uniform=False, seed=None, dtype=tf.float32)
-regularizer = tf.contrib.layers.l2_regularizer(scale = Params.l2_norm if Params.l2_norm is not None else 0.0)
 
-<<<<<<< HEAD
-def highway(x, size, activation = tf.nn.relu, project = False, num_layers = 2, scope = "highway", reuse = None):
-=======
+initializer = lambda: tf.contrib.layers.variance_scaling_initializer(factor=1.0,
+                                                             mode='FAN_AVG',
+                                                             uniform=False,
+                                                             seed=None,
+                                                             dtype=tf.float32)
+initializer_relu = lambda: tf.contrib.layers.variance_scaling_initializer(factor=2.0,
+                                                             mode='FAN_IN',
+                                                             uniform=False,
+                                                             seed=None,
+                                                             dtype=tf.float32)
+regularizer = tf.contrib.layers.l2_regularizer(
+               scale = Params.l2_norm if Params.l2_norm is not None else 0.0)
+
+
 def glu(x):
     """Gated Linear Units from https://arxiv.org/pdf/1612.08083.pdf"""
     x, x_h = tf.split(x, 2, axis = -1)
     return tf.sigmoid(x) * x_h
 
->>>>>>> 4f9b7eb... Fixed learning rate warmup
 def noam_norm(x, epsilon=1.0, scope=None, reuse=None):
     """One version of layer normalization."""
     with tf.name_scope(scope, default_name="noam_norm", values=[x]):
@@ -58,9 +65,9 @@ def layer_norm(x, filters=None, epsilon=1e-6, scope=None, reuse=None):
         filters = x.get_shape()[-1]
     with tf.variable_scope(scope, default_name="layer_norm", values=[x], reuse=reuse):
         scale = tf.get_variable(
-            "layer_norm_scale", [filters], initializer=tf.ones_initializer())
+            "layer_norm_scale", [filters], regularizer = regularizer, initializer=tf.ones_initializer())
         bias = tf.get_variable(
-            "layer_norm_bias", [filters], initializer=tf.zeros_initializer())
+            "layer_norm_bias", [filters], regularizer = regularizer, initializer=tf.zeros_initializer())
         result = layer_norm_compute_python(x, epsilon, scale, bias)
         return result
 
@@ -72,8 +79,10 @@ def highway(x, size = None, activation = tf.nn.relu,
         if project:
             x = conv(x, size, name = "input_projection", reuse = reuse)
         for i in range(num_layers):
-            T = conv(x, size, True, activation = tf.sigmoid, name = "gate_%d"%i, reuse = reuse)
-            H = conv(x, size, True, activation = activation, name = "activation_%d"%i, reuse = reuse)
+            T = conv(x, size, bias = True, activation = tf.sigmoid,
+                     name = "gate_%d"%i, reuse = reuse)
+            H = conv(x, size, bias = True, activation = activation,
+                     name = "activation_%d"%i, reuse = reuse)
             x = H * T + x * (1.0 - T)
         return x
 
@@ -81,19 +90,15 @@ def layer_dropout(inputs, residual, dropout):
     pred = tf.random_uniform([]) < dropout
     return tf.cond(pred, lambda: residual, lambda: inputs + residual)
 
-def dense_connection(inputs, scope = "densenet", reuse = None):
-    inputs = tf.concat(inputs, axis = -1)
-    return conv(inputs, Params.num_units, name = scope, reuse = reuse)
-
 def encoding(word, char, word_embeddings, char_embeddings, scope = "embedding"):
     word_encoding = tf.nn.embedding_lookup(word_embeddings, word)
     char_encoding = tf.nn.embedding_lookup(char_embeddings, char)
     return word_encoding, char_encoding
 
 def residual_block(inputs, num_blocks, num_conv_layers, kernel_size, mask = None,
-                   num_filters = Params.num_units, input_projection = False,
+                   num_filters = 128, input_projection = False, num_heads = 8,
                    seq_len = None, scope = "res_block", is_training = True,
-                   reuse = None, bias = Params.bias, dropout = 0.0):
+                   reuse = None, bias = True, dropout = 0.0):
     with tf.variable_scope(scope, reuse = reuse):
         if input_projection:
             inputs = conv(inputs, num_filters, name = "input_projection", reuse = reuse)
@@ -112,67 +117,68 @@ def conv_block(inputs, num_conv_layers, kernel_size, num_filters, seq_len = None
             outputs, sublayer = conv_block(outputs, num_conv_layers, kernel_size, num_filters,
                 seq_len = seq_len, scope = "encoder_block_%d"%i,reuse = reuse, bias = bias,
                 dropout = dropout, sublayers = (sublayer, total_sublayers))
-            outputs, sublayer = self_attention_block(outputs, num_filters, seq_len, mask = mask,
+            outputs, sublayer = self_attention_block(outputs, num_filters, seq_len, mask = mask, num_heads = num_heads,
                 scope = "self_attention_layers%d"%i, reuse = reuse, is_training = is_training,
                 bias = bias, dropout = dropout, sublayers = (sublayer, total_sublayers))
         return outputs
 
 def conv_block(inputs, num_conv_layers, kernel_size, num_filters,
                seq_len = None, scope = "conv_block", is_training = True,
-               reuse = None, bias = Params.bias, dropout = 0.0, sublayers = (1, 1)):
-    with tf.variable_scope(scope, reuse = reuse):
-        outputs = inputs
+               reuse = None, bias = True, dropout = 0.0, sublayers = (1, 1)):
+        outputs = tf.expand_dims(inputs,2)
+        l, L = sublayers
         for i in range(num_conv_layers):
             residual = outputs
-            outputs = tf.contrib.layers.layer_norm(outputs, scope = "layer_norm_%d"%i, reuse = reuse)
-            outputs = depthwise_separable_convolution(outputs, kernel_size = kernel_size, num_filters = num_filters, scope = "depthwise_conv_layers_%d"%i, is_training = is_training, reuse = reuse) + residual
-            # if (i + 1) % 2 == 0:
-            #     outputs = tf.nn.dropout(outputs, 1.0 - dropout)
-        return outputs
-
-def self_attention_block(inputs, num_filters, seq_len, scope = "self_attention_ffn", reuse = None, is_training = True, bias = Params.bias, dropout = 0.0):
+            if (i) % 2 == 0:
+                outputs = tf.nn.dropout(outputs, 1 - dropout)
             outputs = norm_fn(outputs, scope = "layer_norm_%d"%i, reuse = reuse)
             outputs = depthwise_separable_convolution(outputs,
                 kernel_size = (kernel_size, 1), num_filters = num_filters,
                 scope = "depthwise_conv_layers_%d"%i, is_training = is_training, reuse = reuse)
-            if (i+1) % 2 == 0:
-                outputs = tf.nn.dropout(outputs, 1 - dropout)
             outputs = layer_dropout(outputs, residual, dropout * float(l) / L)
             l += 1
-        return outputs, l
+        return tf.squeeze(outputs,2), l
 
-def self_attention_block(inputs, num_filters, seq_len, mask = None,
+def self_attention_block(inputs, num_filters, seq_len, mask = None, num_heads = 8,
                          scope = "self_attention_ffn", reuse = None, is_training = True,
-                         bias = Params.bias, dropout = 0.0, sublayers = (1, 1)):
+                         bias = True, dropout = 0.0, sublayers = (1, 1)):
     with tf.variable_scope(scope, reuse = reuse):
         # Self attention
-        outputs = norm_fn(inputs, scope = "layer_norm_1", reuse = reuse)
+        outputs = tf.nn.dropout(inputs, 1 - dropout)
+        outputs = norm_fn(outputs, scope = "layer_norm_1", reuse = reuse)
         outputs = multihead_attention(outputs, num_filters,
-            num_heads = Params.num_heads, seq_len = seq_len, reuse = reuse,
+            num_heads = num_heads, seq_len = seq_len, reuse = reuse,
             mask = mask, is_training = is_training, bias = bias, dropout = dropout)
-        outputs = tf.nn.dropout(outputs, 1 - dropout)
         residual = layer_dropout(outputs, inputs, dropout * float(l) / L)
         l += 1
         # Feed-forward
-        outputs = norm_fn(residual, scope = "layer_norm_2", reuse = reuse)
-        outputs = conv(outputs, num_filters, bias, tf.nn.relu, name = "FFN_1", reuse = reuse)
-        outputs = conv(outputs, num_filters, bias, None, name = "FFN_2", reuse = reuse)
-        outputs = tf.nn.dropout(outputs, 1 - dropout)
+        outputs = tf.nn.dropout(residual, 1 - dropout)
+        outputs = norm_fn(outputs, scope = "layer_norm_2", reuse = reuse)
+        outputs = conv(outputs, num_filters, True, tf.nn.relu, name = "FFN_1", reuse = reuse)
+        outputs = conv(outputs, num_filters, True, None, name = "FFN_2", reuse = reuse)
         outputs = layer_dropout(outputs, residual, dropout * float(l) / L)
         l += 1
         return outputs, l
 
 def multihead_attention(queries, units, num_heads,
+                        memory = None,
                         seq_len = None,
                         scope = "Multi_Head_Attention",
                         reuse = None,
                         mask = None,
                         is_training = True,
-                        bias = Params.bias,
+                        bias = True,
                         dropout = 0.0):
     with tf.variable_scope(scope, reuse = reuse):
-        combined = conv(queries, 3 * units, name = "projection", reuse = reuse)
-        Q, K, V = [split_last_dimension(tensor, num_heads) for tensor in tf.split(combined,3,axis = 2)]
+        # Self attention
+        if memory is None:
+            memory = queries
+
+        memory = conv(memory, 2 * units, name = "memory_projection", reuse = reuse)
+        query = conv(queries, units, name = "query_projection", reuse = reuse)
+        Q = split_last_dimension(query, num_heads)
+        K, V = [split_last_dimension(tensor, num_heads) for tensor in tf.split(memory,2,axis = 2)]
+
         key_depth_per_head = units // num_heads
         Q *= key_depth_per_head**-0.5
         x = dot_product_attention(Q,K,V,
@@ -182,32 +188,24 @@ def multihead_attention(queries, units, num_heads,
                                   is_training = is_training,
                                   scope = "dot_product_attention",
                                   reuse = reuse, dropout = dropout)
-        # Apply branched attention from https://arxiv.org/pdf/1711.02132v1.pdf
-        # NOTE Branched attention is disabled until further experiments
-        # if Params.attention == "branched":
-        #     shapes = x.shape.as_list()
-        #     kappa = tf.reshape(tf.nn.softmax(tf.get_variable("kappa", num_heads, dtype = tf.float32, initializer = tf.random_uniform_initializer())), (1, num_heads, 1, 1))
-        #     alpha = tf.reshape(tf.nn.softmax(tf.get_variable("alpha", num_heads, dtype = tf.float32, initializer = tf.random_uniform_initializer())), (1, num_heads, 1, 1))
-        #     x = conv(x, units, name = "output_projection", reuse = reuse) * kappa
-        #     x = conv(x, units, bias = True, activation = tf.nn.relu, name ="Feed_forward_network", reuse = reuse) * alpha
-        #     return tf.reduce_sum(x, axis = 1) + queries
         return combine_last_two_dimensions(tf.transpose(x,[0,2,1,3]))
 
-def conv(inputs, output_size, bias = None, activation = None, name = "conv", reuse = None):
+def conv(inputs, output_size, bias = None, activation = None, kernel_size = 1, name = "conv", reuse = None):
     with tf.variable_scope(name, reuse = reuse):
         shapes = inputs.shape.as_list()
         if len(shapes) > 4:
             raise NotImplementedError
         elif len(shapes) == 4:
-            filter_shape = [1,1,shapes[-1],output_size]
+            filter_shape = [1,kernel_size,shapes[-1],output_size]
             bias_shape = [1,1,1,output_size]
             strides = [1,1,1,1]
         else:
-            filter_shape = [1,shapes[-1],output_size]
+            filter_shape = [kernel_size,shapes[-1],output_size]
             bias_shape = [1,1,output_size]
             strides = 1
         conv_func = tf.nn.conv1d if len(shapes) == 3 else tf.nn.conv2d
         kernel_ = tf.get_variable("kernel_",
+<<<<<<< HEAD
                                     filter_shape,
                                     dtype = tf.float32,
                                     regularizer=regularizer,
@@ -218,6 +216,18 @@ def conv(inputs, output_size, bias = None, activation = None, name = "conv", reu
                                     bias_shape,
                                     regularizer=regularizer,
                                     initializer = initializer_relu if activation is not None else initializer)
+=======
+                        filter_shape,
+                        dtype = tf.float32,
+                        regularizer=regularizer,
+                        initializer = initializer_relu() if activation is not None else initializer())
+        outputs = conv_func(inputs, kernel_, strides, "VALID")
+        if bias:
+            outputs += tf.get_variable("bias_",
+                        bias_shape,
+                        regularizer=regularizer,
+                        initializer = tf.zeros_initializer())
+>>>>>>> 66d433e... Major Change in structure to adopt R-Net by HKUST-KnowComp
         if activation is not None:
             return activation(outputs)
         else:
@@ -227,40 +237,42 @@ def mask_logits(inputs, sequence_length, mask = None, mask_value = -1e30):
     shapes = inputs.shape.as_list()
     if mask is None:
         mask = tf.reshape(
-                         tf.sequence_mask(sequence_length,
-                                          maxlen=shapes[-1],
-                                          dtype = tf.float32),
-                                          [-1,1,1,shapes[-1]] if len(shapes) == 4 else [-1,1,shapes[-1]]
-                         )
-    mask = tf.cast(mask, tf.float32)
+            tf.sequence_mask(sequence_length,
+                maxlen=shapes[-1],
+                dtype = tf.float32),
+                [-1,1,1,shapes[-1]] if len(shapes) == 4 else [-1,1,shapes[-1]]
+            )
+    else: mask = tf.cast(mask, tf.float32)
     return inputs + mask_value * (1 - mask)
 
 def depthwise_separable_convolution(inputs, kernel_size, num_filters,
                                     scope = "depthwise_separable_convolution",
-                                    is_training = True, reuse = None):
+                                    bias = True, is_training = True, reuse = None):
     with tf.variable_scope(scope, reuse = reuse):
         shapes = inputs.shape.as_list()
-        if len(shapes) == 3:
-            inputs = tf.expand_dims(inputs, axis = 2)
         depthwise_filter = tf.get_variable("depthwise_filter",
                                         (kernel_size[0], kernel_size[1], shapes[-1], 1),
                                         dtype = tf.float32,
                                         regularizer=regularizer,
-                                        initializer = initializer_relu)
+                                        initializer = initializer_relu())
         pointwise_filter = tf.get_variable("pointwise_filter",
                                         (1,1,shapes[-1],num_filters),
                                         dtype = tf.float32,
                                         regularizer=regularizer,
-                                        initializer = initializer_relu)
+                                        initializer = initializer_relu())
         outputs = tf.nn.separable_conv2d(inputs,
                                         depthwise_filter,
                                         pointwise_filter,
                                         strides = (1,1,1,1),
                                         padding = "SAME")
+        if bias:
+            b = tf.get_variable("bias",
+                    outputs.shape[-1],
+                    regularizer=regularizer,
+                    initializer = tf.zeros_initializer())
+            outputs += b
         outputs = tf.nn.relu(outputs)
-        if len(shapes) > 3:
-            return outputs
-        return tf.squeeze(outputs)
+        return outputs
 
 def split_last_dimension(x, n):
     """Reshape x so that the last dimension becomes two dimensions.
@@ -300,24 +312,23 @@ def dot_product_attention(q,
     A Tensor.
     """
     with tf.variable_scope(scope, default_name="dot_product_attention", reuse = reuse):
-        q = tf.nn.relu(q)
-        k = tf.nn.relu(k)
+        # q = tf.nn.relu(q)
+        # k = tf.nn.relu(k)
         # [batch, num_heads, query_length, memory_length]
         logits = tf.matmul(q, k, transpose_b=True)
         if bias:
             b = tf.get_variable("bias",
                     logits.shape[-1],
                     regularizer=regularizer,
-                    initializer = initializer)
+                    initializer = tf.zeros_initializer())
             logits += b
-        if seq_len is not None:
-            shapes = logits.shape.as_list()
+        if mask is not None:
+            shapes = [x  if x != None else -1 for x in logits.shape.as_list()]
             mask = tf.reshape(mask, [shapes[0],1,1,shapes[-1]])
             logits = mask_logits(logits, seq_len, mask = mask)
         weights = tf.nn.softmax(logits, name="attention_weights")
         # dropping out the attention links for each of the heads
-        # if is_training and Params.dropout is not None:
-        # weights = tf.nn.dropout(weights, 1.0 - dropout)
+        weights = tf.nn.dropout(weights, 1.0 - dropout)
         return tf.matmul(weights, v)
 
 def combine_last_two_dimensions(x):
@@ -400,14 +411,14 @@ def get_timing_signal_1d(length, channels, min_timescale=1.0, max_timescale=1.0e
 
 def trilinear(args,
             output_size = 1,
-            bias = Params.bias, bias_start=0.0,
+            bias = True,
             squeeze=False,
             wd=0.0,
             input_keep_prob= 1.0,
             scope = "trilinear"):
     with tf.variable_scope(scope):
         flat_args = [flatten(arg, 1) for arg in args]
-        # flat_args = [tf.nn.dropout(arg, input_keep_prob) for arg in flat_args]
+        flat_args = [tf.nn.dropout(arg, input_keep_prob) for arg in flat_args]
         flat_out = _linear(flat_args, output_size, bias, scope=scope)
         out = reconstruct(flat_out, args[0], 1)
         return tf.squeeze(out, -1)
@@ -436,9 +447,9 @@ def reconstruct(tensor, ref, keep):
 def _linear(args,
             output_size,
             bias,
-            bias_initializer=initializer,
+            bias_initializer=tf.zeros_initializer(),
             scope = None,
-            kernel_initializer=initializer,
+            kernel_initializer=initializer(),
             reuse = None):
   """Linear map: sum_i(args[i] * W[i]), where W[i] is a variable.
   Args:
