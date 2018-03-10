@@ -17,27 +17,29 @@ from tensorflow.python.ops import clip_ops
 
 from functools import reduce
 from operator import mul
-from params import Params
-# from common_layers import *
 
 '''
+<<<<<<< HEAD
 Some functions are borrowed from Tensor2Tensor Library https://github.com/tensorflow/tensor2tensor/blob/master/tensor2tensor/layers/common_attention.py
 and BiDAF repository https://github.com/allenai/bi-att-flow.
+=======
+Some functions are taken directly from Tensor2Tensor Library:
+https://github.com/tensorflow/tensor2tensor/
+and BiDAF repository:
+https://github.com/allenai/bi-att-flow
+>>>>>>> 5854ac1... fixed a minor bug
 '''
 
 
 initializer = lambda: tf.contrib.layers.variance_scaling_initializer(factor=1.0,
                                                              mode='FAN_AVG',
-                                                             uniform=False,
-                                                             seed=None,
+                                                             uniform=True,
                                                              dtype=tf.float32)
 initializer_relu = lambda: tf.contrib.layers.variance_scaling_initializer(factor=2.0,
                                                              mode='FAN_IN',
                                                              uniform=False,
-                                                             seed=None,
                                                              dtype=tf.float32)
-regularizer = tf.contrib.layers.l2_regularizer(
-               scale = Params.l2_norm if Params.l2_norm is not None else 0.0)
+regularizer = tf.contrib.layers.l2_regularizer(scale = 3e-7)
 
 
 def glu(x):
@@ -74,7 +76,7 @@ def layer_norm(x, filters=None, epsilon=1e-6, scope=None, reuse=None):
 norm_fn = layer_norm#tf.contrib.layers.layer_norm #tf.contrib.layers.layer_norm or noam_norm
 
 def highway(x, size = None, activation = tf.nn.relu,
-            num_layers = 2, scope = "highway", reuse = None):
+            num_layers = 2, scope = "highway", dropout = 0.0, reuse = None):
     with tf.variable_scope(scope, reuse):
         if project:
             x = conv(x, size, name = "input_projection", reuse = reuse)
@@ -83,17 +85,13 @@ def highway(x, size = None, activation = tf.nn.relu,
                      name = "gate_%d"%i, reuse = reuse)
             H = conv(x, size, bias = True, activation = activation,
                      name = "activation_%d"%i, reuse = reuse)
+            H = tf.nn.dropout(H, 1.0 - dropout)
             x = H * T + x * (1.0 - T)
         return x
 
 def layer_dropout(inputs, residual, dropout):
     pred = tf.random_uniform([]) < dropout
-    return tf.cond(pred, lambda: residual, lambda: inputs + residual)
-
-def encoding(word, char, word_embeddings, char_embeddings, scope = "embedding"):
-    word_encoding = tf.nn.embedding_lookup(word_embeddings, word)
-    char_encoding = tf.nn.embedding_lookup(char_embeddings, char)
-    return word_encoding, char_encoding
+    return tf.cond(pred, lambda: residual, lambda: tf.nn.dropout(inputs, 1.0 - dropout) + residual)
 
 def residual_block(inputs, num_blocks, num_conv_layers, kernel_size, mask = None,
                    num_filters = 128, input_projection = False, num_heads = 8,
@@ -130,7 +128,7 @@ def conv_block(inputs, num_conv_layers, kernel_size, num_filters,
         for i in range(num_conv_layers):
             residual = outputs
             if (i) % 2 == 0:
-                outputs = tf.nn.dropout(outputs, 1 - dropout)
+                outputs = tf.nn.dropout(outputs, 1.0 - dropout)
             outputs = norm_fn(outputs, scope = "layer_norm_%d"%i, reuse = reuse)
             outputs = depthwise_separable_convolution(outputs,
                 kernel_size = (kernel_size, 1), num_filters = num_filters,
@@ -144,7 +142,7 @@ def self_attention_block(inputs, num_filters, seq_len, mask = None, num_heads = 
                          bias = True, dropout = 0.0, sublayers = (1, 1)):
     with tf.variable_scope(scope, reuse = reuse):
         # Self attention
-        outputs = tf.nn.dropout(inputs, 1 - dropout)
+        outputs = tf.nn.dropout(inputs, 1.0 - dropout)
         outputs = norm_fn(outputs, scope = "layer_norm_1", reuse = reuse)
         outputs = multihead_attention(outputs, num_filters,
             num_heads = num_heads, seq_len = seq_len, reuse = reuse,
@@ -152,7 +150,7 @@ def self_attention_block(inputs, num_filters, seq_len, mask = None, num_heads = 
         residual = layer_dropout(outputs, inputs, dropout * float(l) / L)
         l += 1
         # Feed-forward
-        outputs = tf.nn.dropout(residual, 1 - dropout)
+        outputs = tf.nn.dropout(residual, 1.0 - dropout)
         outputs = norm_fn(outputs, scope = "layer_norm_2", reuse = reuse)
         outputs = conv(outputs, num_filters, True, tf.nn.relu, name = "FFN_1", reuse = reuse)
         outputs = conv(outputs, num_filters, True, None, name = "FFN_2", reuse = reuse)
@@ -205,18 +203,6 @@ def conv(inputs, output_size, bias = None, activation = None, kernel_size = 1, n
             strides = 1
         conv_func = tf.nn.conv1d if len(shapes) == 3 else tf.nn.conv2d
         kernel_ = tf.get_variable("kernel_",
-<<<<<<< HEAD
-                                    filter_shape,
-                                    dtype = tf.float32,
-                                    regularizer=regularizer,
-                                    initializer = initializer_relu if activation is not None else initializer)
-        outputs = conv_func(inputs, kernel_, strides, "VALID")
-        if bias:
-            outputs += tf.get_variable("bias_",
-                                    bias_shape,
-                                    regularizer=regularizer,
-                                    initializer = initializer_relu if activation is not None else initializer)
-=======
                         filter_shape,
                         dtype = tf.float32,
                         regularizer=regularizer,
@@ -227,22 +213,14 @@ def conv(inputs, output_size, bias = None, activation = None, kernel_size = 1, n
                         bias_shape,
                         regularizer=regularizer,
                         initializer = tf.zeros_initializer())
->>>>>>> 66d433e... Major Change in structure to adopt R-Net by HKUST-KnowComp
         if activation is not None:
             return activation(outputs)
         else:
             return outputs
 
-def mask_logits(inputs, sequence_length, mask = None, mask_value = -1e30):
+def mask_logits(inputs, mask, mask_value = -1e30):
     shapes = inputs.shape.as_list()
-    if mask is None:
-        mask = tf.reshape(
-            tf.sequence_mask(sequence_length,
-                maxlen=shapes[-1],
-                dtype = tf.float32),
-                [-1,1,1,shapes[-1]] if len(shapes) == 4 else [-1,1,shapes[-1]]
-            )
-    else: mask = tf.cast(mask, tf.float32)
+    mask = tf.cast(mask, tf.float32)
     return inputs + mask_value * (1 - mask)
 
 def depthwise_separable_convolution(inputs, kernel_size, num_filters,
@@ -312,8 +290,6 @@ def dot_product_attention(q,
     A Tensor.
     """
     with tf.variable_scope(scope, default_name="dot_product_attention", reuse = reuse):
-        # q = tf.nn.relu(q)
-        # k = tf.nn.relu(k)
         # [batch, num_heads, query_length, memory_length]
         logits = tf.matmul(q, k, transpose_b=True)
         if bias:
@@ -325,7 +301,7 @@ def dot_product_attention(q,
         if mask is not None:
             shapes = [x  if x != None else -1 for x in logits.shape.as_list()]
             mask = tf.reshape(mask, [shapes[0],1,1,shapes[-1]])
-            logits = mask_logits(logits, seq_len, mask = mask)
+            logits = mask_logits(logits, mask)
         weights = tf.nn.softmax(logits, name="attention_weights")
         # dropping out the attention links for each of the heads
         weights = tf.nn.dropout(weights, 1.0 - dropout)

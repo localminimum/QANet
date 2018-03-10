@@ -1,4 +1,3 @@
-nltk==3.2.4
-numpy==1.13.1
-tqdm==4.15.0
-spacy==2.0.2
+numpy
+tqdm
+spacy==2.0.9

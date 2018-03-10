@@ -5,10 +5,16 @@ import tensorflow as tf
 import bottle
 from bottle import route, run
 import threading
+import json
+import numpy as np
 
-from params import Params
-from process import *
+from prepro import convert_to_features, word_tokenize
 from time import sleep
+
+'''
+This file is taken and modified from R-Net by Minsangkim142
+https://github.com/minsangkim142/R-net
+'''
 
 app = bottle.Bottle()
 query = []
@@ -37,10 +43,10 @@ def answer():
     return response_
 
 class Demo(object):
-    def __init__(self, model):
+    def __init__(self, model, config):
         run_event = threading.Event()
         run_event.set()
-        threading.Thread(target=self.demo_backend, args = [model, run_event]).start()
+        threading.Thread(target=self.demo_backend, args = [model, config, run_event]).start()
         app.run(port=8080, host='0.0.0.0')
         try:
             while 1:
@@ -49,24 +55,36 @@ class Demo(object):
             print "Closing server..."
             run_event.clear()
 
-    def demo_backend(self, model, run_event):
+    def demo_backend(self, model, config, run_event):
         global query, response
-        dict_ = pickle.load(open(Params.data_dir + "dictionary.pkl","r"))
+
+        with open(config.word_dictionary, "r") as fh:
+            word_dictionary = json.load(fh)
+        with open(config.char_dictionary, "r") as fh:
+            char_dictionary = json.load(fh)
+
+        sess_config = tf.ConfigProto(allow_soft_placement=True)
+        sess_config.gpu_options.allow_growth = True
 
         with model.graph.as_default():
-            sv = tf.train.Supervisor()
-            with sv.managed_session() as sess:
-                sv.saver.restore(sess, tf.train.latest_checkpoint(Params.logdir))
+
+            with tf.Session(config=sess_config) as sess:
+                sess.run(tf.global_variables_initializer())
+                saver = tf.train.Saver()
+                saver.restore(sess, tf.train.latest_checkpoint(config.save_dir))
+                if config.decay < 1.0:
+                    sess.run(model.assign_vars)
                 while run_event.is_set():
                     sleep(0.1)
                     if query:
-                        data, shapes = dict_.realtime_process(query)
-                        fd = {m:d for i,(m,d) in enumerate(zip(model.data, data))}
-                        ids, confidence = sess.run([model.output_index, model.dp], feed_dict = fd)
-                        ids = ids[0]
-                        confidence = confidence[0]
-                        if ids[0] == ids[1]:
-                            ids[1] += 1
-                        passage_t = tokenize(query[0])
-                        response = " ".join(passage_t[ids[0]:ids[1]])
+                        context = word_tokenize(query[0].replace("''", '" ').replace("``", '" '))
+                        c,ch,q,qh = convert_to_features(config, query, word_dictionary, char_dictionary)
+                        fd = {'context:0': [c],
+                              'question:0': [q],
+                              'context_char:0': [ch],
+                              'question_char:0': [qh]}
+                        yp1,yp2 = sess.run([model.yp1, model.yp2], feed_dict = fd)
+                        if yp1 == yp2:
+                            yp2[0] += 1
+                        response = " ".join(context[yp1[0]:yp2[0]])
                         query = []
