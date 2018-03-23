@@ -54,8 +54,11 @@ def train(config):
             saver = tf.train.Saver()
             train_handle = sess.run(train_iterator.string_handle())
             dev_handle = sess.run(dev_iterator.string_handle())
+            if os.path.exists(os.path.join(config.save_dir, "checkpoint")):
+                saver.restore(sess, tf.train.latest_checkpoint(config.save_dir))
+            global_step = max(sess.run(model.global_step), 1)
 
-            for _ in tqdm(range(1, config.num_steps + 1)):
+            for _ in tqdm(range(global_step, config.num_steps + 1)):
                 global_step = sess.run(model.global_step) + 1
                 loss, train_op = sess.run([model.loss, model.train_op], feed_dict={
                                           handle: train_handle, model.dropout: config.dropout})

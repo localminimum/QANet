@@ -52,7 +52,7 @@ class Demo(object):
             while 1:
                 sleep(.1)
         except KeyboardInterrupt:
-            print "Closing server..."
+            print("Closing server...")
             run_event.clear()
 
     def demo_backend(self, model, config, run_event):
