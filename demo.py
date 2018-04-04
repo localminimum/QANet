@@ -84,7 +84,6 @@ class Demo(object):
                               'context_char:0': [ch],
                               'question_char:0': [qh]}
                         yp1,yp2 = sess.run([model.yp1, model.yp2], feed_dict = fd)
-                        if yp1 == yp2:
-                            yp2[0] += 1
+                        yp2[0] += 1
                         response = " ".join(context[yp1[0]:yp2[0]])
                         query = []
