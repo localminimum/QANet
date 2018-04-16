@@ -19,17 +19,11 @@ from functools import reduce
 from operator import mul
 
 '''
-<<<<<<< HEAD
-Some functions are borrowed from Tensor2Tensor Library https://github.com/tensorflow/tensor2tensor/blob/master/tensor2tensor/layers/common_attention.py
-and BiDAF repository https://github.com/allenai/bi-att-flow.
-=======
 Some functions are taken directly from Tensor2Tensor Library:
 https://github.com/tensorflow/tensor2tensor/
 and BiDAF repository:
 https://github.com/allenai/bi-att-flow
->>>>>>> 5854ac1... fixed a minor bug
 '''
-
 
 initializer = lambda: tf.contrib.layers.variance_scaling_initializer(factor=1.0,
                                                              mode='FAN_AVG',
@@ -40,7 +34,6 @@ initializer_relu = lambda: tf.contrib.layers.variance_scaling_initializer(factor
                                                              uniform=False,
                                                              dtype=tf.float32)
 regularizer = tf.contrib.layers.l2_regularizer(scale = 3e-7)
-
 
 def glu(x):
     """Gated Linear Units from https://arxiv.org/pdf/1612.08083.pdf"""
@@ -78,7 +71,9 @@ norm_fn = layer_norm#tf.contrib.layers.layer_norm #tf.contrib.layers.layer_norm 
 def highway(x, size = None, activation = tf.nn.relu,
             num_layers = 2, scope = "highway", dropout = 0.0, reuse = None):
     with tf.variable_scope(scope, reuse):
-        if project:
+        if size is None:
+            size = x.shape.as_list()[-1]
+        else:
             x = conv(x, size, name = "input_projection", reuse = reuse)
         for i in range(num_layers):
             T = conv(x, size, bias = True, activation = tf.sigmoid,
@@ -105,13 +100,6 @@ def residual_block(inputs, num_blocks, num_conv_layers, kernel_size, mask = None
         total_sublayers = (num_conv_layers + 2) * num_blocks
         for i in range(num_blocks):
             outputs = add_timing_signal_1d(outputs)
-            outputs = conv_block(outputs, num_conv_layers, kernel_size, num_filters, seq_len = seq_len, scope = "encoder_block_%d"%i,reuse = reuse, bias = bias, dropout = dropout)
-            outputs = self_attention_block(outputs, num_filters, seq_len, scope = "self_attention_layers%d"%i, reuse = reuse, is_training = is_training, bias = bias, dropout = dropout)
-            # if (i + 1) % 2 == 0:
-            #     outputs = tf.nn.dropout(outputs, 1.0 - dropout)
-        return outputs
-
-def conv_block(inputs, num_conv_layers, kernel_size, num_filters, seq_len = None, scope = "conv_block", is_training = True, reuse = None, bias = Params.bias, dropout = 0.0):
             outputs, sublayer = conv_block(outputs, num_conv_layers, kernel_size, num_filters,
                 seq_len = seq_len, scope = "encoder_block_%d"%i,reuse = reuse, bias = bias,
                 dropout = dropout, sublayers = (sublayer, total_sublayers))
@@ -123,6 +111,7 @@ def conv_block(inputs, num_conv_layers, kernel_size, num_filters, seq_len = None
 def conv_block(inputs, num_conv_layers, kernel_size, num_filters,
                seq_len = None, scope = "conv_block", is_training = True,
                reuse = None, bias = True, dropout = 0.0, sublayers = (1, 1)):
+    with tf.variable_scope(scope, reuse = reuse):
         outputs = tf.expand_dims(inputs,2)
         l, L = sublayers
         for i in range(num_conv_layers):
@@ -141,6 +130,7 @@ def self_attention_block(inputs, num_filters, seq_len, mask = None, num_heads = 
                          scope = "self_attention_ffn", reuse = None, is_training = True,
                          bias = True, dropout = 0.0, sublayers = (1, 1)):
     with tf.variable_scope(scope, reuse = reuse):
+        l, L = sublayers
         # Self attention
         outputs = tf.nn.dropout(inputs, 1.0 - dropout)
         outputs = norm_fn(outputs, scope = "layer_norm_1", reuse = reuse)
@@ -464,10 +454,7 @@ def _linear(args,
     weights = tf.get_variable(
         "linear_kernel", [total_arg_size, output_size],
         dtype=dtype,
-<<<<<<< HEAD
-=======
         regularizer=regularizer,
->>>>>>> f1b1311... Fixed indent
         initializer=kernel_initializer)
     if len(args) == 1:
       res = math_ops.matmul(args[0], weights)
@@ -480,10 +467,7 @@ def _linear(args,
       biases = tf.get_variable(
           "linear_bias", [output_size],
           dtype=dtype,
-<<<<<<< HEAD
-=======
           regularizer=regularizer,
->>>>>>> f1b1311... Fixed indent
           initializer=bias_initializer)
     return nn_ops.bias_add(res, biases)
 

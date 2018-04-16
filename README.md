@@ -1,5 +1,8 @@
 # QANet
 A Tensorflow implementation of Google's [QANet](https://openreview.net/pdf?id=B14TlG-RW) (previously Fast Reading Comprehension (FRC)) from [ICLR2018](https://openreview.net/forum?id=B14TlG-RW).
+
+I wrote a blog post about implementing QANet. Check out [here](https://medium.com/@minsangkim/implementing-question-answering-networks-with-cnns-5ae5f08e312b) for more information!
+
 Training and preprocessing pipeline have been adopted from [R-Net by HKUST-KnowComp](https://github.com/HKUST-KnowComp/R-Net). Demo mode is working. After training, just use `python config.py --mode demo` to run an interactive demo server.
 
 Due to a memory issue, a single head dot-product attention is used as opposed to a 8 heads multi-head attention like in the original paper. The hidden size is also reduced to 96 from 128 due to usage of a GTX1080 compared to a P100 used in the paper. (8GB of GPU memory is insufficient. If you have a 12GB memory GPU please share your training results with us.)
@@ -70,6 +73,7 @@ Here are the collected results from this repository and the original paper.
 | Original Paper |     340,000    |  128 |        8        |    240k (aug)   | 76.2 | 84.6 |
 
 ## TODO's
+- [x] Training and testing the model
 - [x] Add trilinear function to Context-to-Query attention
 - [x] Apply dropouts + stochastic depth dropout
 - [x] Query-to-context attention
