@@ -20,7 +20,7 @@ Pretrained [GloVe embeddings](https://nlp.stanford.edu/projects/glove/) obtained
   * NumPy
   * tqdm
   * TensorFlow>=1.5
-  * spacy==2.0.9 (only if you want to load the [pretrained model](https://drive.google.com/open?id=1gJtcPBNuDr9_2LuP_4x_4VN6_5fQCdfB), otherwise lower versions are fine)
+  * spacy==2.0.9
   * bottle (only for demo)
 
 ## Usage
@@ -47,7 +47,7 @@ python evaluate-v1.1.py ~/data/squad/dev-v1.1.json train/{model_name}/answer/ans
 The default directory for the tensorboard log file is `train/{model_name}/event`
 
 ### Pretrained Model
-Pretrained model weights are available [here](https://drive.google.com/open?id=1gJtcPBNuDr9_2LuP_4x_4VN6_5fQCdfB). Download and unpack the "FRC" folder in the "train" directory.
+Pretrained model weights are temporarily not available.
 
 ## Detailed Implementaion
 
