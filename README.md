@@ -7,7 +7,7 @@ Training and preprocessing pipeline have been adopted from [R-Net by HKUST-KnowC
 
 Due to a memory issue, a single head dot-product attention is used as opposed to a 8 heads multi-head attention like in the original paper. The hidden size is also reduced to 96 from 128 due to usage of a GTX1080 compared to a P100 used in the paper. (8GB of GPU memory is insufficient. If you have a 12GB memory GPU please share your training results with us.)
 
-Currently, the best model reaches EM/F1 = 70.0/79.4 in 60k steps (about 6 hours with bucket / 8 hours without bucket in a GTX1080). Detailed results are listed below.
+Currently, the best model reaches EM/F1 = 70.7/79.8 in 60k steps. Detailed results are listed below.
 
 ![Alt text](/../master/screenshots/figure.png?raw=true "Network Outline")
 
@@ -68,6 +68,7 @@ Here are the collected results from this repository and the original paper.
 |:--------------:|:--------------:|:----:|:---------------:|:---------------:|:----:|:----:|
 |       My Model |     35,000     |  96  |        1        |   87k (no aug)  | 69.0 | 78.0 |
 |       My model |     60,000     |  96  |        1        |   87k (no aug)  | 70.0 | 79.4 |
+|       My model ( reported by [@jasonbw](https://github.com/jasonwbw))|     60,000     |  128  |        1        |   87k (no aug)  | 70.7 | 79.8 |
 | Original Paper |     35,000     |  128 |        8        |   87k (no aug)  |  NA  | 77.0 |
 | Original Paper |     150,000    |  128 |        8        |   87k (no aug)  | 72.5 | 81.4 |
 | Original Paper |     340,000    |  128 |        8        |    240k (aug)   | 76.2 | 84.6 |
