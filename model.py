@@ -1,5 +1,5 @@
 import tensorflow as tf
-from layers import initializer, regularizer, residual_block, highway, conv, mask_logits, trilinear, total_params
+from layers import initializer, regularizer, residual_block, highway, conv, mask_logits, trilinear, total_params, optimized_trilinear_for_attention
 
 class Model(object):
     def __init__(self, config, batch, word_mat=None, char_mat=None, trainable=True, opt=True, demo = False, graph = None):
@@ -127,6 +127,7 @@ class Model(object):
             C = tf.tile(tf.expand_dims(c,2),[1,1,self.q_maxlen,1])
             Q = tf.tile(tf.expand_dims(q,1),[1,self.c_maxlen,1,1])
             S = trilinear([C, Q, C*Q], input_keep_prob = 1.0 - self.dropout)
+            S = optimized_trilinear_for_attention([c, q], self.c_maxlen, self.q_maxlen, input_keep_prob = 1.0 - self.dropout)
             mask_q = tf.expand_dims(self.q_mask, 1)
             S_ = tf.nn.softmax(mask_logits(S, mask = mask_q))
             mask_c = tf.expand_dims(self.c_mask, 2)
